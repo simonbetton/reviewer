@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, type CSSProperties, type ReactNode } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -9,6 +9,7 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { ReviewSidebar } from "./review/ReviewSidebar";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
@@ -57,8 +58,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const macosWindowControlsStyle =
     isElectron && isMacPlatform(navigator.platform)
-      ? ({ "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET } as CSSProperties)
+      ? ({
+          "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET,
+        } as CSSProperties)
       : undefined;
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const sidebar =
+    pathname === "/" || pathname.startsWith("/review") ? <ReviewSidebar /> : <ThreadSidebar />;
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -90,7 +96,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        <ThreadSidebar />
+        {sidebar}
         <SidebarRail />
       </Sidebar>
       {children}
