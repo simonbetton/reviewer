@@ -141,6 +141,28 @@ import {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import {
+  REVIEW_WS_METHODS,
+  ReviewGitHubBeginOAuthInput,
+  ReviewGitHubBeginOAuthResult,
+  ReviewGitHubCompleteOAuthInput,
+  ReviewInboxSnapshot,
+  ReviewInstallSkillInput,
+  ReviewInstallerResult,
+  ReviewMcpConnection,
+  ReviewRecordInteractionInput,
+  ReviewRemoveMcpConnectionInput,
+  ReviewRemoveSkillInput,
+  ReviewRun,
+  ReviewSetPullRequestPinnedInput,
+  ReviewSetRepositoryPinnedInput,
+  ReviewSetSkillEnabledInput,
+  ReviewSkill,
+  ReviewStartRunInput,
+  ReviewSubmitRunInput,
+  ReviewUpsertMcpConnectionInput,
+  ReviewWorkspaceError,
+} from "./review.ts";
 import { VcsError } from "./vcs.ts";
 
 export const WS_METHODS = {
@@ -352,6 +374,101 @@ export const WsSourceControlPublishRepositoryRpc = Rpc.make(
     error: Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),
   },
 );
+
+export const WsReviewGetSnapshotRpc = Rpc.make(REVIEW_WS_METHODS.getSnapshot, {
+  payload: Schema.Struct({}),
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewSubscribeRpc = Rpc.make(REVIEW_WS_METHODS.subscribe, {
+  payload: Schema.Struct({}),
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsReviewGitHubBeginOAuthRpc = Rpc.make(REVIEW_WS_METHODS.githubBeginOAuth, {
+  payload: ReviewGitHubBeginOAuthInput,
+  success: ReviewGitHubBeginOAuthResult,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewGitHubCompleteOAuthRpc = Rpc.make(REVIEW_WS_METHODS.githubCompleteOAuth, {
+  payload: ReviewGitHubCompleteOAuthInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewRefreshInboxRpc = Rpc.make(REVIEW_WS_METHODS.refreshInbox, {
+  payload: Schema.Struct({}),
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewRecordInteractionRpc = Rpc.make(REVIEW_WS_METHODS.recordInteraction, {
+  payload: ReviewRecordInteractionInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewSetRepositoryPinnedRpc = Rpc.make(REVIEW_WS_METHODS.setRepositoryPinned, {
+  payload: ReviewSetRepositoryPinnedInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewSetPullRequestPinnedRpc = Rpc.make(REVIEW_WS_METHODS.setPullRequestPinned, {
+  payload: ReviewSetPullRequestPinnedInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewUpsertMcpConnectionRpc = Rpc.make(REVIEW_WS_METHODS.upsertMcpConnection, {
+  payload: ReviewUpsertMcpConnectionInput,
+  success: ReviewMcpConnection,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewRemoveMcpConnectionRpc = Rpc.make(REVIEW_WS_METHODS.removeMcpConnection, {
+  payload: ReviewRemoveMcpConnectionInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewInstallSkillRpc = Rpc.make(REVIEW_WS_METHODS.installSkill, {
+  payload: ReviewInstallSkillInput,
+  success: Schema.Struct({
+    skill: ReviewSkill,
+    installer: ReviewInstallerResult,
+    snapshot: ReviewInboxSnapshot,
+  }),
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewSetSkillEnabledRpc = Rpc.make(REVIEW_WS_METHODS.setSkillEnabled, {
+  payload: ReviewSetSkillEnabledInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewRemoveSkillRpc = Rpc.make(REVIEW_WS_METHODS.removeSkill, {
+  payload: ReviewRemoveSkillInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewStartRunRpc = Rpc.make(REVIEW_WS_METHODS.startRun, {
+  payload: ReviewStartRunInput,
+  success: ReviewRun,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewSubmitRunRpc = Rpc.make(REVIEW_WS_METHODS.submitRun, {
+  payload: ReviewSubmitRunInput,
+  success: ReviewRun,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
   payload: ProjectSearchEntriesInput,
@@ -699,6 +816,21 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlPublishRepositoryRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,
+  WsReviewGetSnapshotRpc,
+  WsReviewSubscribeRpc,
+  WsReviewGitHubBeginOAuthRpc,
+  WsReviewGitHubCompleteOAuthRpc,
+  WsReviewRefreshInboxRpc,
+  WsReviewRecordInteractionRpc,
+  WsReviewSetRepositoryPinnedRpc,
+  WsReviewSetPullRequestPinnedRpc,
+  WsReviewUpsertMcpConnectionRpc,
+  WsReviewRemoveMcpConnectionRpc,
+  WsReviewInstallSkillRpc,
+  WsReviewSetSkillEnabledRpc,
+  WsReviewRemoveSkillRpc,
+  WsReviewStartRunRpc,
+  WsReviewSubmitRunRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,

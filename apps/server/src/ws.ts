@@ -49,6 +49,7 @@ import {
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   EnvironmentAuthorizationError,
+  REVIEW_WS_METHODS,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -104,6 +105,7 @@ import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
+import * as ReviewWorkspace from "./review/ReviewWorkspace.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
@@ -319,6 +321,21 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.vcsSwitchRef, AuthOrchestrationOperateScope],
   [WS_METHODS.vcsInit, AuthOrchestrationOperateScope],
   [WS_METHODS.reviewGetDiffPreview, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.getSnapshot, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.subscribe, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.githubBeginOAuth, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.githubCompleteOAuth, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.refreshInbox, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.recordInteraction, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.setRepositoryPinned, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.setPullRequestPinned, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.upsertMcpConnection, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.removeMcpConnection, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.installSkill, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.setSkillEnabled, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.removeSkill, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.startRun, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.submitRun, AuthReviewWriteScope],
   [WS_METHODS.terminalOpen, AuthTerminalOperateScope],
   [WS_METHODS.terminalAttach, AuthTerminalOperateScope],
   [WS_METHODS.terminalWrite, AuthTerminalOperateScope],
@@ -431,6 +448,7 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
+      const reviewWorkspace = yield* ReviewWorkspace.make();
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -1320,6 +1338,98 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
               "rpc.aggregate": "source-control",
             },
           ),
+        [REVIEW_WS_METHODS.getSnapshot]: (_input) =>
+          observeRpcEffect(REVIEW_WS_METHODS.getSnapshot, reviewWorkspace.getSnapshot, {
+            "rpc.aggregate": "review",
+          }),
+        [REVIEW_WS_METHODS.subscribe]: (_input) =>
+          observeRpcStream(REVIEW_WS_METHODS.subscribe, reviewWorkspace.streamSnapshots, {
+            "rpc.aggregate": "review",
+          }),
+        [REVIEW_WS_METHODS.githubBeginOAuth]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.githubBeginOAuth,
+            reviewWorkspace.beginGitHubOAuth(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.githubCompleteOAuth]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.githubCompleteOAuth,
+            reviewWorkspace.completeGitHubOAuth(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.refreshInbox]: (_input) =>
+          observeRpcEffect(REVIEW_WS_METHODS.refreshInbox, reviewWorkspace.refreshInbox, {
+            "rpc.aggregate": "review",
+          }),
+        [REVIEW_WS_METHODS.recordInteraction]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.recordInteraction,
+            reviewWorkspace.recordInteraction(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.setRepositoryPinned]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.setRepositoryPinned,
+            reviewWorkspace.setRepositoryPinned(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.setPullRequestPinned]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.setPullRequestPinned,
+            reviewWorkspace.setPullRequestPinned(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.upsertMcpConnection]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.upsertMcpConnection,
+            reviewWorkspace.upsertMcpConnection(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.removeMcpConnection]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.removeMcpConnection,
+            reviewWorkspace.removeMcpConnection(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.installSkill]: (input) =>
+          observeRpcEffect(REVIEW_WS_METHODS.installSkill, reviewWorkspace.installSkill(input), {
+            "rpc.aggregate": "review",
+          }),
+        [REVIEW_WS_METHODS.setSkillEnabled]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.setSkillEnabled,
+            reviewWorkspace.setSkillEnabled(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.removeSkill]: (input) =>
+          observeRpcEffect(REVIEW_WS_METHODS.removeSkill, reviewWorkspace.removeSkill(input), {
+            "rpc.aggregate": "review",
+          }),
+        [REVIEW_WS_METHODS.startRun]: (input) =>
+          observeRpcEffect(REVIEW_WS_METHODS.startRun, reviewWorkspace.startRun(input), {
+            "rpc.aggregate": "review",
+          }),
+        [REVIEW_WS_METHODS.submitRun]: (input) =>
+          observeRpcEffect(REVIEW_WS_METHODS.submitRun, reviewWorkspace.submitRun(input), {
+            "rpc.aggregate": "review",
+          }),
         [WS_METHODS.projectsSearchEntries]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsSearchEntries,

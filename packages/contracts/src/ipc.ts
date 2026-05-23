@@ -111,6 +111,26 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type {
+  ReviewGitHubBeginOAuthInput,
+  ReviewGitHubBeginOAuthResult,
+  ReviewGitHubCompleteOAuthInput,
+  ReviewInboxSnapshot,
+  ReviewInstallSkillInput,
+  ReviewInstallerResult,
+  ReviewMcpConnection,
+  ReviewRecordInteractionInput,
+  ReviewRemoveMcpConnectionInput,
+  ReviewRemoveSkillInput,
+  ReviewRun,
+  ReviewSetPullRequestPinnedInput,
+  ReviewSetRepositoryPinnedInput,
+  ReviewSetSkillEnabledInput,
+  ReviewSkill,
+  ReviewStartRunInput,
+  ReviewSubmitRunInput,
+  ReviewUpsertMcpConnectionInput,
+} from "./review.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -1104,6 +1124,33 @@ export interface EnvironmentApi {
       input: SourceControlPublishRepositoryInput,
     ) => Promise<SourceControlPublishRepositoryResult>;
   };
+  review: {
+    getSnapshot: () => Promise<ReviewInboxSnapshot>;
+    subscribe: (
+      callback: (snapshot: ReviewInboxSnapshot) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
+    beginGitHubOAuth: (input: ReviewGitHubBeginOAuthInput) => Promise<ReviewGitHubBeginOAuthResult>;
+    completeGitHubOAuth: (input: ReviewGitHubCompleteOAuthInput) => Promise<ReviewInboxSnapshot>;
+    refreshInbox: () => Promise<ReviewInboxSnapshot>;
+    recordInteraction: (input: ReviewRecordInteractionInput) => Promise<ReviewInboxSnapshot>;
+    setRepositoryPinned: (input: ReviewSetRepositoryPinnedInput) => Promise<ReviewInboxSnapshot>;
+    setPullRequestPinned: (input: ReviewSetPullRequestPinnedInput) => Promise<ReviewInboxSnapshot>;
+    upsertMcpConnection: (input: ReviewUpsertMcpConnectionInput) => Promise<ReviewMcpConnection>;
+    removeMcpConnection: (input: ReviewRemoveMcpConnectionInput) => Promise<ReviewInboxSnapshot>;
+    installSkill: (input: ReviewInstallSkillInput) => Promise<{
+      readonly skill: ReviewSkill;
+      readonly installer: ReviewInstallerResult;
+      readonly snapshot: ReviewInboxSnapshot;
+    }>;
+    setSkillEnabled: (input: ReviewSetSkillEnabledInput) => Promise<ReviewInboxSnapshot>;
+    removeSkill: (input: ReviewRemoveSkillInput) => Promise<ReviewInboxSnapshot>;
+    startRun: (input: ReviewStartRunInput) => Promise<ReviewRun>;
+    submitRun: (input: ReviewSubmitRunInput) => Promise<ReviewRun>;
+    getDiffPreview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;
+  };
   vcs: {
     listRefs: (input: VcsListRefsInput) => Promise<VcsListRefsResult>;
     createWorktree: (input: VcsCreateWorktreeInput) => Promise<VcsCreateWorktreeResult>;
@@ -1126,9 +1173,6 @@ export interface EnvironmentApi {
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
-  };
-  review: {
-    getDiffPreview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
