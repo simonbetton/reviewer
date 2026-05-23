@@ -96,7 +96,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        <ThreadSidebar />
+        {sidebar}
         <SidebarRail />
       </Sidebar>
       {children}
