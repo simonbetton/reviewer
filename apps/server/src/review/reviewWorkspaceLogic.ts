@@ -141,6 +141,9 @@ export function buildReviewSidebarGroups(
     });
 }
 
+// TODO(review): Replace placeholder findings with provider-backed analysis of PR diffs/files.
+// Wire to Codex/provider runtime and selected skills/MCP connections.
+// See .plans/21-github-peer-review-handoff.md — P1 agent review intelligence.
 export function createReviewFindings(input: {
   readonly runId: string;
   readonly pullRequest: ReviewPullRequest;

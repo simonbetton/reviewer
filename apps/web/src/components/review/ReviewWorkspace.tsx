@@ -42,6 +42,9 @@ function EmptyState() {
     reportFailure: false,
   });
 
+  // TODO(review): Poll completeGitHubOAuth(deviceCode) after user authorizes on GitHub.
+  // beginGitHubOAuth only starts the device flow; inbox stays empty until completion.
+  // See .plans/21-github-peer-review-handoff.md — P0 OAuth completion.
   const beginOAuth = async () => {
     if (primaryEnvironmentId === null) return;
     setPending(true);

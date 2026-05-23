@@ -149,6 +149,8 @@ function skillIdFromPackageSpec(packageSpec: string) {
     .replace(/^-|-$/g, "")}`;
 }
 
+// TODO(review): Execute `npx skills install` via VcsProcess when runInstaller is true.
+// See .plans/21-github-peer-review-handoff.md — P1 skills installer.
 function runSkillsInstaller(input: ReviewInstallSkillInput) {
   const command = `npx skills install ${input.packageSpec}`;
   return Effect.succeed({
@@ -170,6 +172,9 @@ function parseGitHubLinkNext(linkHeader: string | null): string | null {
   return null;
 }
 
+// TODO(review): Load/save PersistedReviewWorkspaceState from config.stateDir/review-workspace.json
+// and persist OAuth tokens via ServerSecretStore. State is in-memory only today.
+// See .plans/21-github-peer-review-handoff.md — P0 persistence.
 export const make = Effect.fn("makeReviewWorkspace")(function* () {
   const changes = yield* PubSub.unbounded<ReviewInboxSnapshot>();
   const stateRef = yield* Ref.make<PersistedReviewWorkspaceState>(defaultState());
@@ -563,6 +568,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* () {
         }
         const at = yield* nowIso;
         const runId = `run-${crypto.randomUUID()}`;
+        // TODO(review): Run async provider-backed review; stream findings; honor skillIds/mcpConnectionIds.
         const run: ReviewRun = {
           id: runId,
           pullRequestId: input.pullRequestId,
@@ -607,6 +613,8 @@ export const make = Effect.fn("makeReviewWorkspace")(function* () {
             "Connect GitHub with OAuth before submitting a review.",
           );
         }
+        // TODO(review): POST review to GitHub Reviews API as the connected user, not just local state.
+        // See .plans/21-github-peer-review-handoff.md — P2 GitHub review submission.
         const postedRun = markRunPosted(run, userLogin, yield* nowIso);
         yield* updateState("review.submitRun", (current) => ({
           ...current,
