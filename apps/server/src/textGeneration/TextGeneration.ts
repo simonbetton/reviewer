@@ -86,7 +86,6 @@ export interface TextGenerationService {
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
 }
-
 /**
  * TextGeneration - Service tag for commit and PR text generation.
  */
