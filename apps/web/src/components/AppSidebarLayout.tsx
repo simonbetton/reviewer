@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, type CSSProperties, type ReactNode } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -62,9 +62,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET,
         } as CSSProperties)
       : undefined;
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const sidebar =
-    pathname === "/" || pathname.startsWith("/review") ? <ReviewSidebar /> : <ThreadSidebar />;
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -96,7 +93,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {sidebar}
+        <ReviewSidebar />
+        <ThreadSidebar />
         <SidebarRail />
       </Sidebar>
       {children}
