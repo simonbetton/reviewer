@@ -25,6 +25,7 @@ import {
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
+  GitPullRequestIcon,
   LinkIcon,
   MessageSquareIcon,
   SettingsIcon,
@@ -83,6 +84,8 @@ import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
   buildProjectActionItems,
+  buildPullRequestActionItems,
+  buildReviewRepositoryActionItems,
   buildRootGroups,
   buildThreadActionItems,
   type CommandPaletteActionItem,
@@ -116,6 +119,11 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
+import { useReviewAppStore } from "../reviewAppStore";
+import {
+  buildReviewPullRequestRouteParams,
+  buildReviewRepositoryRouteParams,
+} from "../reviewRoutes";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -463,6 +471,9 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const projects = useProjects();
   const threads = useThreadShells();
+  const reviewSnapshot = useReviewAppStore((store) => store.snapshot);
+  const selectReviewRepository = useReviewAppStore((store) => store.selectRepository);
+  const selectReviewPullRequest = useReviewAppStore((store) => store.selectPullRequest);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
@@ -542,6 +553,14 @@ function OpenCommandPaletteDialog(props: {
   const projectTitleById = useMemo(
     () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.title])),
     [projects],
+  );
+  const reviewRepositories = useMemo(
+    () => (reviewSnapshot?.groups ?? []).flatMap((group) => group.repositories),
+    [reviewSnapshot?.groups],
+  );
+  const reviewRepositoryById = useMemo(
+    () => new Map(reviewRepositories.map((repository) => [repository.id, repository] as const)),
+    [reviewRepositories],
   );
 
   const activeThreadId = activeThread?.id;
@@ -669,6 +688,45 @@ function OpenCommandPaletteDialog(props: {
     [activeThreadId, clientSettings.sidebarThreadSortOrder, navigate, projectTitleById, threads],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  const reviewRepositorySearchItems = useMemo(
+    () =>
+      buildReviewRepositoryActionItems({
+        repositories: reviewRepositories,
+        icon: <GitPullRequestIcon className={ITEM_ICON_CLASS} />,
+        runRepository: async (repository) => {
+          selectReviewRepository(repository.id);
+          selectReviewPullRequest(null);
+          await navigate({
+            to: "/review/github/$owner/$repo",
+            params: buildReviewRepositoryRouteParams({ repository }),
+          });
+        },
+      }),
+    [navigate, reviewRepositories, selectReviewPullRequest, selectReviewRepository],
+  );
+  const pullRequestSearchItems = useMemo(
+    () =>
+      buildPullRequestActionItems({
+        pullRequests: reviewSnapshot?.pullRequests ?? [],
+        repositoryById: reviewRepositoryById,
+        icon: <GitPullRequestIcon className={ITEM_ICON_CLASS} />,
+        runPullRequest: async ({ repository, pullRequest }) => {
+          selectReviewRepository(repository.id);
+          selectReviewPullRequest(pullRequest.id);
+          await navigate({
+            to: "/review/github/$owner/$repo/pull/$number",
+            params: buildReviewPullRequestRouteParams({ repository, pullRequest }),
+          });
+        },
+      }),
+    [
+      navigate,
+      reviewRepositoryById,
+      reviewSnapshot?.pullRequests,
+      selectReviewPullRequest,
+      selectReviewRepository,
+    ],
+  );
 
   function pushPaletteView(view: CommandPaletteView): void {
     setViewStack((previousViews) => [
@@ -1014,6 +1072,8 @@ function OpenCommandPaletteDialog(props: {
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
+    reviewRepositorySearchItems,
+    pullRequestSearchItems,
   });
 
   const handleAddProject = useCallback(

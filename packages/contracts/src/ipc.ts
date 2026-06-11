@@ -115,20 +115,27 @@ import type {
   ReviewGitHubBeginOAuthInput,
   ReviewGitHubBeginOAuthResult,
   ReviewGitHubCompleteOAuthInput,
+  ReviewDeleteSummaryDraftInput,
   ReviewInboxSnapshot,
   ReviewInstallSkillInput,
   ReviewInstallerResult,
   ReviewMcpConnection,
-  ReviewRecordInteractionInput,
+  ReviewPostInlineCardInput,
+  ReviewPostSummaryCardInput,
+  ReviewRefreshPullRequestDetailInput,
   ReviewRemoveMcpConnectionInput,
   ReviewRemoveSkillInput,
   ReviewRun,
+  ReviewSendChatMessageInput,
+  ReviewSetPullRequestHiddenInput,
   ReviewSetPullRequestPinnedInput,
-  ReviewSetRepositoryPinnedInput,
+  ReviewSetRepositoryHiddenInput,
   ReviewSetSkillEnabledInput,
   ReviewSkill,
   ReviewStartRunInput,
   ReviewSubmitRunInput,
+  ReviewUpdateCommentDraftInput,
+  ReviewUpdateSummaryDraftInput,
   ReviewUpsertMcpConnectionInput,
 } from "./review.ts";
 
@@ -1135,9 +1142,9 @@ export interface EnvironmentApi {
     beginGitHubOAuth: (input: ReviewGitHubBeginOAuthInput) => Promise<ReviewGitHubBeginOAuthResult>;
     completeGitHubOAuth: (input: ReviewGitHubCompleteOAuthInput) => Promise<ReviewInboxSnapshot>;
     refreshInbox: () => Promise<ReviewInboxSnapshot>;
-    recordInteraction: (input: ReviewRecordInteractionInput) => Promise<ReviewInboxSnapshot>;
-    setRepositoryPinned: (input: ReviewSetRepositoryPinnedInput) => Promise<ReviewInboxSnapshot>;
     setPullRequestPinned: (input: ReviewSetPullRequestPinnedInput) => Promise<ReviewInboxSnapshot>;
+    setRepositoryHidden: (input: ReviewSetRepositoryHiddenInput) => Promise<ReviewInboxSnapshot>;
+    setPullRequestHidden: (input: ReviewSetPullRequestHiddenInput) => Promise<ReviewInboxSnapshot>;
     upsertMcpConnection: (input: ReviewUpsertMcpConnectionInput) => Promise<ReviewMcpConnection>;
     removeMcpConnection: (input: ReviewRemoveMcpConnectionInput) => Promise<ReviewInboxSnapshot>;
     installSkill: (input: ReviewInstallSkillInput) => Promise<{
@@ -1147,6 +1154,15 @@ export interface EnvironmentApi {
     }>;
     setSkillEnabled: (input: ReviewSetSkillEnabledInput) => Promise<ReviewInboxSnapshot>;
     removeSkill: (input: ReviewRemoveSkillInput) => Promise<ReviewInboxSnapshot>;
+    refreshPullRequestDetail: (
+      input: ReviewRefreshPullRequestDetailInput,
+    ) => Promise<ReviewInboxSnapshot>;
+    updateSummaryDraft: (input: ReviewUpdateSummaryDraftInput) => Promise<ReviewInboxSnapshot>;
+    deleteSummaryDraft: (input: ReviewDeleteSummaryDraftInput) => Promise<ReviewInboxSnapshot>;
+    updateCommentDraft: (input: ReviewUpdateCommentDraftInput) => Promise<ReviewInboxSnapshot>;
+    sendChatMessage: (input: ReviewSendChatMessageInput) => Promise<ReviewInboxSnapshot>;
+    postSummaryCard: (input: ReviewPostSummaryCardInput) => Promise<ReviewInboxSnapshot>;
+    postInlineCard: (input: ReviewPostInlineCardInput) => Promise<ReviewInboxSnapshot>;
     startRun: (input: ReviewStartRunInput) => Promise<ReviewRun>;
     submitRun: (input: ReviewSubmitRunInput) => Promise<ReviewRun>;
     getDiffPreview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;

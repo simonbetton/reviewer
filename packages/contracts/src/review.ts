@@ -1,6 +1,8 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { IsoDateTime, NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { GitCommandError } from "./git.ts";
+import { ModelSelection } from "./orchestration.ts";
 import { SourceControlProviderKind } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 
@@ -192,8 +194,7 @@ export const ReviewRepository = Schema.Struct({
   url: Schema.String,
   openPullRequestCount: NonNegativeInt,
   lastProviderUpdatedAt: Schema.NullOr(IsoDateTime),
-  lastInteractedAt: Schema.NullOr(IsoDateTime),
-  pinned: Schema.Boolean,
+  hidden: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type ReviewRepository = typeof ReviewRepository.Type;
 
@@ -218,9 +219,10 @@ export const ReviewPullRequest = Schema.Struct({
   commentCount: NonNegativeInt,
   reviewDecision: Schema.NullOr(Schema.String),
   checksState: Schema.NullOr(Schema.String),
+  headSha: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
   lastProviderUpdatedAt: Schema.NullOr(IsoDateTime),
-  lastInteractedAt: Schema.NullOr(IsoDateTime),
   pinned: Schema.Boolean,
+  hidden: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type ReviewPullRequest = typeof ReviewPullRequest.Type;
 
@@ -273,16 +275,188 @@ export const ReviewRun = Schema.Struct({
   mcpConnectionIds: Schema.Array(TrimmedNonEmptyString),
   findings: Schema.Array(ReviewFinding),
   summary: Schema.String,
+  headSha: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  summaryDraftId: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  commentDraftIds: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
+  modelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   postedByGitHubUserLogin: Schema.NullOr(TrimmedNonEmptyString),
 });
 export type ReviewRun = typeof ReviewRun.Type;
 
+export const ReviewCommentSide = Schema.Literals(["LEFT", "RIGHT"]);
+export type ReviewCommentSide = typeof ReviewCommentSide.Type;
+
+export const ReviewSubmitEvent = Schema.Literals(["COMMENT", "REQUEST_CHANGES", "APPROVE"]);
+export type ReviewSubmitEvent = typeof ReviewSubmitEvent.Type;
+
+export const ReviewCodeBlockLineKind = Schema.Literals(["context", "addition", "deletion"]);
+export type ReviewCodeBlockLineKind = typeof ReviewCodeBlockLineKind.Type;
+
+export const ReviewCodeBlockLine = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  kind: ReviewCodeBlockLineKind,
+  content: Schema.String,
+  oldLine: Schema.NullOr(PositiveInt),
+  newLine: Schema.NullOr(PositiveInt),
+});
+export type ReviewCodeBlockLine = typeof ReviewCodeBlockLine.Type;
+
+export const ReviewCodeBlock = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  pullRequestId: TrimmedNonEmptyString,
+  filePath: TrimmedNonEmptyString,
+  status: Schema.String,
+  patch: Schema.NullOr(Schema.String),
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+  startLine: Schema.NullOr(PositiveInt),
+  endLine: Schema.NullOr(PositiveInt),
+  lines: Schema.Array(ReviewCodeBlockLine),
+});
+export type ReviewCodeBlock = typeof ReviewCodeBlock.Type;
+
+export const ReviewCommentDraftStatus = Schema.Literals(["draft", "dismissed", "posted", "failed"]);
+export type ReviewCommentDraftStatus = typeof ReviewCommentDraftStatus.Type;
+
+export const ReviewCommentDraft = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  runId: TrimmedNonEmptyString,
+  pullRequestId: TrimmedNonEmptyString,
+  findingId: Schema.NullOr(TrimmedNonEmptyString),
+  body: Schema.String,
+  filePath: TrimmedNonEmptyString,
+  line: PositiveInt,
+  side: ReviewCommentSide,
+  startLine: Schema.NullOr(PositiveInt),
+  startSide: Schema.NullOr(ReviewCommentSide),
+  status: ReviewCommentDraftStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  postedGitHubCommentId: Schema.NullOr(Schema.String),
+  postedByGitHubUserLogin: Schema.NullOr(TrimmedNonEmptyString),
+  failureDetail: Schema.NullOr(Schema.String),
+});
+export type ReviewCommentDraft = typeof ReviewCommentDraft.Type;
+
+export const ReviewSummaryDraftStatus = Schema.Literals(["draft", "posted", "failed"]);
+export type ReviewSummaryDraftStatus = typeof ReviewSummaryDraftStatus.Type;
+
+export const ReviewSummaryDraft = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  runId: TrimmedNonEmptyString,
+  pullRequestId: TrimmedNonEmptyString,
+  body: Schema.String,
+  event: ReviewSubmitEvent,
+  status: ReviewSummaryDraftStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  postedGitHubReviewId: Schema.NullOr(Schema.String),
+  postedByGitHubUserLogin: Schema.NullOr(TrimmedNonEmptyString),
+  failureDetail: Schema.NullOr(Schema.String),
+});
+export type ReviewSummaryDraft = typeof ReviewSummaryDraft.Type;
+
+export const ReviewGitHubReview = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  pullRequestId: TrimmedNonEmptyString,
+  authorLogin: TrimmedNonEmptyString,
+  body: Schema.String,
+  state: Schema.String,
+  commitId: Schema.NullOr(Schema.String),
+  submittedAt: Schema.NullOr(IsoDateTime),
+  url: Schema.NullOr(Schema.String),
+});
+export type ReviewGitHubReview = typeof ReviewGitHubReview.Type;
+
+export const ReviewGitHubReviewComment = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  pullRequestId: TrimmedNonEmptyString,
+  reviewId: Schema.NullOr(Schema.String),
+  authorLogin: TrimmedNonEmptyString,
+  body: Schema.String,
+  path: TrimmedNonEmptyString,
+  line: Schema.NullOr(PositiveInt),
+  side: Schema.NullOr(ReviewCommentSide),
+  startLine: Schema.NullOr(PositiveInt),
+  startSide: Schema.NullOr(ReviewCommentSide),
+  diffHunk: Schema.NullOr(Schema.String),
+  inReplyToId: Schema.NullOr(Schema.String),
+  url: Schema.NullOr(Schema.String),
+  createdAt: Schema.NullOr(IsoDateTime),
+  updatedAt: Schema.NullOr(IsoDateTime),
+});
+export type ReviewGitHubReviewComment = typeof ReviewGitHubReviewComment.Type;
+
+export const ReviewConversationRole = Schema.Literals(["user", "agent"]);
+export type ReviewConversationRole = typeof ReviewConversationRole.Type;
+
+export const ReviewPostCardKind = Schema.Literals(["summary", "inline"]);
+export type ReviewPostCardKind = typeof ReviewPostCardKind.Type;
+
+export const ReviewPostCardStatus = Schema.Literals(["draft", "dismissed", "posted", "failed"]);
+export type ReviewPostCardStatus = typeof ReviewPostCardStatus.Type;
+
+export const ReviewPostCard = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  pullRequestId: TrimmedNonEmptyString,
+  messageId: TrimmedNonEmptyString,
+  kind: ReviewPostCardKind,
+  body: Schema.String,
+  status: ReviewPostCardStatus,
+  filePath: Schema.NullOr(TrimmedNonEmptyString),
+  line: Schema.NullOr(PositiveInt),
+  side: Schema.NullOr(ReviewCommentSide),
+  startLine: Schema.NullOr(PositiveInt),
+  startSide: Schema.NullOr(ReviewCommentSide),
+  inReplyToGitHubCommentId: Schema.NullOr(Schema.String),
+  postedGitHubReviewId: Schema.NullOr(Schema.String),
+  postedGitHubCommentId: Schema.NullOr(Schema.String),
+  failureDetail: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ReviewPostCard = typeof ReviewPostCard.Type;
+
+export const ReviewConversationMessage = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  pullRequestId: TrimmedNonEmptyString,
+  role: ReviewConversationRole,
+  body: Schema.String,
+  modelSelection: Schema.NullOr(ModelSelection),
+  proposedPostCardIds: Schema.Array(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+export type ReviewConversationMessage = typeof ReviewConversationMessage.Type;
+
+export const ReviewPullRequestDetail = Schema.Struct({
+  pullRequestId: TrimmedNonEmptyString,
+  headSha: Schema.NullOr(Schema.String),
+  codeBlocks: Schema.Array(ReviewCodeBlock),
+  githubReviews: Schema.Array(ReviewGitHubReview),
+  githubReviewComments: Schema.Array(ReviewGitHubReviewComment),
+  summaryDrafts: Schema.Array(ReviewSummaryDraft),
+  commentDrafts: Schema.Array(ReviewCommentDraft),
+  conversationMessages: Schema.Array(ReviewConversationMessage),
+  postCards: Schema.Array(ReviewPostCard),
+  syncedAt: Schema.NullOr(IsoDateTime),
+});
+export type ReviewPullRequestDetail = typeof ReviewPullRequestDetail.Type;
+
 export const ReviewInboxSnapshot = Schema.Struct({
   github: ReviewGitHubAuthState,
   groups: Schema.Array(ReviewSidebarGroup),
   pullRequests: Schema.Array(ReviewPullRequest),
+  pullRequestDetails: Schema.Array(ReviewPullRequestDetail).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
   skills: Schema.Array(ReviewSkill),
   mcpConnections: Schema.Array(ReviewMcpConnection),
   reviewRuns: Schema.Array(ReviewRun),
@@ -290,36 +464,92 @@ export const ReviewInboxSnapshot = Schema.Struct({
 });
 export type ReviewInboxSnapshot = typeof ReviewInboxSnapshot.Type;
 
-export const ReviewRecordInteractionInput = Schema.Struct({
-  repositoryId: Schema.optional(TrimmedNonEmptyString),
-  pullRequestId: Schema.optional(TrimmedNonEmptyString),
-});
-export type ReviewRecordInteractionInput = typeof ReviewRecordInteractionInput.Type;
-
-export const ReviewSetRepositoryPinnedInput = Schema.Struct({
-  repositoryId: TrimmedNonEmptyString,
-  pinned: Schema.Boolean,
-});
-export type ReviewSetRepositoryPinnedInput = typeof ReviewSetRepositoryPinnedInput.Type;
-
 export const ReviewSetPullRequestPinnedInput = Schema.Struct({
   pullRequestId: TrimmedNonEmptyString,
   pinned: Schema.Boolean,
 });
 export type ReviewSetPullRequestPinnedInput = typeof ReviewSetPullRequestPinnedInput.Type;
 
+export const ReviewSetRepositoryHiddenInput = Schema.Struct({
+  repositoryId: TrimmedNonEmptyString,
+  hidden: Schema.Boolean,
+});
+export type ReviewSetRepositoryHiddenInput = typeof ReviewSetRepositoryHiddenInput.Type;
+
+export const ReviewSetPullRequestHiddenInput = Schema.Struct({
+  pullRequestId: TrimmedNonEmptyString,
+  hidden: Schema.Boolean,
+});
+export type ReviewSetPullRequestHiddenInput = typeof ReviewSetPullRequestHiddenInput.Type;
+
 export const ReviewStartRunInput = Schema.Struct({
   pullRequestId: TrimmedNonEmptyString,
   categories: Schema.Array(ReviewCategory),
   skillIds: Schema.Array(TrimmedNonEmptyString),
   mcpConnectionIds: Schema.Array(TrimmedNonEmptyString),
+  modelSelection: Schema.optional(ModelSelection),
 });
 export type ReviewStartRunInput = typeof ReviewStartRunInput.Type;
 
 export const ReviewSubmitRunInput = Schema.Struct({
   runId: TrimmedNonEmptyString,
+  event: Schema.optional(ReviewSubmitEvent),
 });
 export type ReviewSubmitRunInput = typeof ReviewSubmitRunInput.Type;
+
+export const ReviewRefreshPullRequestDetailInput = Schema.Struct({
+  pullRequestId: TrimmedNonEmptyString,
+});
+export type ReviewRefreshPullRequestDetailInput = typeof ReviewRefreshPullRequestDetailInput.Type;
+
+export const ReviewUpdateSummaryDraftInput = Schema.Struct({
+  summaryDraftId: TrimmedNonEmptyString,
+  body: Schema.optional(Schema.String),
+  event: Schema.optional(ReviewSubmitEvent),
+});
+export type ReviewUpdateSummaryDraftInput = typeof ReviewUpdateSummaryDraftInput.Type;
+
+export const ReviewDeleteSummaryDraftInput = Schema.Struct({
+  summaryDraftId: TrimmedNonEmptyString,
+});
+export type ReviewDeleteSummaryDraftInput = typeof ReviewDeleteSummaryDraftInput.Type;
+
+export const ReviewUpdateCommentDraftInput = Schema.Struct({
+  commentDraftId: TrimmedNonEmptyString,
+  body: Schema.optional(Schema.String),
+  status: Schema.optional(ReviewCommentDraftStatus),
+  filePath: Schema.optional(TrimmedNonEmptyString),
+  line: Schema.optional(PositiveInt),
+  side: Schema.optional(ReviewCommentSide),
+  startLine: Schema.optional(Schema.NullOr(PositiveInt)),
+  startSide: Schema.optional(Schema.NullOr(ReviewCommentSide)),
+});
+export type ReviewUpdateCommentDraftInput = typeof ReviewUpdateCommentDraftInput.Type;
+
+export const ReviewSendChatMessageInput = Schema.Struct({
+  pullRequestId: TrimmedNonEmptyString,
+  message: TrimmedNonEmptyString,
+  modelSelection: Schema.optional(ModelSelection),
+});
+export type ReviewSendChatMessageInput = typeof ReviewSendChatMessageInput.Type;
+
+export const ReviewPostSummaryCardInput = Schema.Struct({
+  postCardId: TrimmedNonEmptyString,
+  body: Schema.optional(Schema.String),
+});
+export type ReviewPostSummaryCardInput = typeof ReviewPostSummaryCardInput.Type;
+
+export const ReviewPostInlineCardInput = Schema.Struct({
+  postCardId: TrimmedNonEmptyString,
+  body: Schema.optional(Schema.String),
+  filePath: Schema.optional(TrimmedNonEmptyString),
+  line: Schema.optional(PositiveInt),
+  side: Schema.optional(ReviewCommentSide),
+  startLine: Schema.optional(Schema.NullOr(PositiveInt)),
+  startSide: Schema.optional(Schema.NullOr(ReviewCommentSide)),
+  inReplyToGitHubCommentId: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type ReviewPostInlineCardInput = typeof ReviewPostInlineCardInput.Type;
 
 export const REVIEW_WS_METHODS = {
   getSnapshot: "review.getSnapshot",
@@ -327,14 +557,21 @@ export const REVIEW_WS_METHODS = {
   githubBeginOAuth: "review.github.beginOAuth",
   githubCompleteOAuth: "review.github.completeOAuth",
   refreshInbox: "review.refreshInbox",
-  recordInteraction: "review.recordInteraction",
-  setRepositoryPinned: "review.setRepositoryPinned",
   setPullRequestPinned: "review.setPullRequestPinned",
+  setRepositoryHidden: "review.setRepositoryHidden",
+  setPullRequestHidden: "review.setPullRequestHidden",
   upsertMcpConnection: "review.upsertMcpConnection",
   removeMcpConnection: "review.removeMcpConnection",
   installSkill: "review.installSkill",
   setSkillEnabled: "review.setSkillEnabled",
   removeSkill: "review.removeSkill",
+  refreshPullRequestDetail: "review.refreshPullRequestDetail",
+  updateSummaryDraft: "review.updateSummaryDraft",
+  deleteSummaryDraft: "review.deleteSummaryDraft",
+  updateCommentDraft: "review.updateCommentDraft",
+  sendChatMessage: "review.sendChatMessage",
+  postSummaryCard: "review.postSummaryCard",
+  postInlineCard: "review.postInlineCard",
   startRun: "review.startRun",
   submitRun: "review.submitRun",
 } as const;

@@ -23,6 +23,9 @@ export interface PersistedUiState {
   collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
+  collapsedReviewOwnerGroupIds?: string[];
+  collapsedReviewRepositoryIds?: string[];
+  expandedReviewHiddenSectionIds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
 }
@@ -41,7 +44,13 @@ export interface UiEndpointState {
   defaultAdvertisedEndpointKey: string | null;
 }
 
-export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {}
+export interface UiReviewState {
+  reviewOwnerGroupExpandedById: Record<string, boolean>;
+  reviewRepositoryExpandedById: Record<string, boolean>;
+  reviewHiddenSectionExpandedById: Record<string, boolean>;
+}
+
+export interface UiState extends UiProjectState, UiThreadState, UiEndpointState, UiReviewState {}
 
 const initialState: UiState = {
   projectExpandedById: {},
@@ -49,6 +58,9 @@ const initialState: UiState = {
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
+  reviewOwnerGroupExpandedById: {},
+  reviewRepositoryExpandedById: {},
+  reviewHiddenSectionExpandedById: {},
 };
 
 const LEGACY_PROJECT_CWD_PREFERENCE_PREFIX = "legacy-project-cwd:";
@@ -127,6 +139,24 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
     threadChangedFilesExpandedById: sanitizePersistedThreadChangedFilesExpanded(
       parsed.threadChangedFilesExpandedById,
     ),
+    reviewOwnerGroupExpandedById: Object.fromEntries(
+      sanitizeStringArray(parsed.collapsedReviewOwnerGroupIds).map((groupId) => [
+        groupId,
+        false,
+      ]),
+    ),
+    reviewRepositoryExpandedById: Object.fromEntries(
+      sanitizeStringArray(parsed.collapsedReviewRepositoryIds).map((repositoryId) => [
+        repositoryId,
+        false,
+      ]),
+    ),
+    reviewHiddenSectionExpandedById: Object.fromEntries(
+      sanitizeStringArray(parsed.expandedReviewHiddenSectionIds).map((sectionId) => [
+        sectionId,
+        true,
+      ]),
+    ),
     defaultAdvertisedEndpointKey:
       typeof parsed.defaultAdvertisedEndpointKey === "string" &&
       parsed.defaultAdvertisedEndpointKey.length > 0
@@ -195,6 +225,15 @@ export function persistState(state: UiState): void {
         ([key]) => key !== LEGACY_PROJECT_EXPANSION_DEFAULT_KEY,
       ),
     );
+    const collapsedReviewRepositoryIds = Object.entries(state.reviewRepositoryExpandedById)
+      .filter(([, expanded]) => !expanded)
+      .map(([repositoryId]) => repositoryId);
+    const collapsedReviewOwnerGroupIds = Object.entries(state.reviewOwnerGroupExpandedById)
+      .filter(([, expanded]) => !expanded)
+      .map(([groupId]) => groupId);
+    const expandedReviewHiddenSectionIds = Object.entries(state.reviewHiddenSectionExpandedById)
+      .filter(([, expanded]) => expanded)
+      .map(([sectionId]) => sectionId);
     const threadChangedFilesExpandedById = Object.fromEntries(
       Object.entries(state.threadChangedFilesExpandedById).flatMap(([threadId, turns]) => {
         const nextTurns = Object.fromEntries(
@@ -209,6 +248,9 @@ export function persistState(state: UiState): void {
         projectExpandedById,
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
+        collapsedReviewOwnerGroupIds,
+        collapsedReviewRepositoryIds,
+        expandedReviewHiddenSectionIds,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         threadChangedFilesExpandedById,
       } satisfies PersistedUiState),
@@ -367,6 +409,141 @@ export function setProjectExpanded(
   };
 }
 
+export function toggleReviewRepository(state: UiState, repositoryId: string): UiState {
+  const expanded = state.reviewRepositoryExpandedById[repositoryId] ?? true;
+  return setReviewRepositoryExpanded(state, repositoryId, !expanded);
+}
+
+export function toggleReviewOwnerGroup(state: UiState, groupId: string): UiState {
+  const expanded = state.reviewOwnerGroupExpandedById[groupId] ?? true;
+  return setReviewOwnerGroupExpanded(state, groupId, !expanded);
+}
+
+export function setReviewOwnerGroupExpanded(
+  state: UiState,
+  groupId: string,
+  expanded: boolean,
+): UiState {
+  if ((state.reviewOwnerGroupExpandedById[groupId] ?? true) === expanded) {
+    return state;
+  }
+
+  if (expanded) {
+    const nextExpandedById = { ...state.reviewOwnerGroupExpandedById };
+    delete nextExpandedById[groupId];
+    return {
+      ...state,
+      reviewOwnerGroupExpandedById: nextExpandedById,
+    };
+  }
+
+  return {
+    ...state,
+    reviewOwnerGroupExpandedById: {
+      ...state.reviewOwnerGroupExpandedById,
+      [groupId]: false,
+    },
+  };
+}
+
+export function setReviewRepositoryExpanded(
+  state: UiState,
+  repositoryId: string,
+  expanded: boolean,
+): UiState {
+  if ((state.reviewRepositoryExpandedById[repositoryId] ?? true) === expanded) {
+    return state;
+  }
+
+  if (expanded) {
+    const nextExpandedById = { ...state.reviewRepositoryExpandedById };
+    delete nextExpandedById[repositoryId];
+    return {
+      ...state,
+      reviewRepositoryExpandedById: nextExpandedById,
+    };
+  }
+
+  return {
+    ...state,
+    reviewRepositoryExpandedById: {
+      ...state.reviewRepositoryExpandedById,
+      [repositoryId]: false,
+    },
+  };
+}
+
+export function toggleReviewHiddenSection(state: UiState, sectionId: string): UiState {
+  const expanded = state.reviewHiddenSectionExpandedById[sectionId] ?? false;
+  return setReviewHiddenSectionExpanded(state, sectionId, !expanded);
+}
+
+export function setReviewHiddenSectionExpanded(
+  state: UiState,
+  sectionId: string,
+  expanded: boolean,
+): UiState {
+  if ((state.reviewHiddenSectionExpandedById[sectionId] ?? false) === expanded) {
+    return state;
+  }
+
+  if (!expanded) {
+    const nextExpandedById = { ...state.reviewHiddenSectionExpandedById };
+    delete nextExpandedById[sectionId];
+    return {
+      ...state,
+      reviewHiddenSectionExpandedById: nextExpandedById,
+    };
+  }
+
+  return {
+    ...state,
+    reviewHiddenSectionExpandedById: {
+      ...state.reviewHiddenSectionExpandedById,
+      [sectionId]: true,
+    },
+  };
+}
+
+export function collapseReviewItems(
+  state: UiState,
+  input: {
+    readonly ownerGroupIds: ReadonlyArray<string>;
+    readonly repositoryIds: ReadonlyArray<string>;
+    readonly hiddenSectionIds: ReadonlyArray<string>;
+  },
+): UiState {
+  const reviewOwnerGroupExpandedById = {
+    ...state.reviewOwnerGroupExpandedById,
+    ...Object.fromEntries(input.ownerGroupIds.map((id) => [id, false] as const)),
+  };
+  const reviewRepositoryExpandedById = {
+    ...state.reviewRepositoryExpandedById,
+    ...Object.fromEntries(input.repositoryIds.map((id) => [id, false] as const)),
+  };
+  const hiddenSectionIdSet = new Set(input.hiddenSectionIds);
+  const reviewHiddenSectionExpandedById = Object.fromEntries(
+    Object.entries(state.reviewHiddenSectionExpandedById).filter(
+      ([sectionId]) => !hiddenSectionIdSet.has(sectionId),
+    ),
+  );
+
+  if (
+    recordsEqual(state.reviewOwnerGroupExpandedById, reviewOwnerGroupExpandedById) &&
+    recordsEqual(state.reviewRepositoryExpandedById, reviewRepositoryExpandedById) &&
+    recordsEqual(state.reviewHiddenSectionExpandedById, reviewHiddenSectionExpandedById)
+  ) {
+    return state;
+  }
+
+  return {
+    ...state,
+    reviewOwnerGroupExpandedById,
+    reviewRepositoryExpandedById,
+    reviewHiddenSectionExpandedById,
+  };
+}
+
 export function reorderProjects(
   state: UiState,
   currentProjectOrder: readonly string[],
@@ -417,6 +594,17 @@ interface UiStateStore extends UiState {
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
+  toggleReviewOwnerGroup: (groupId: string) => void;
+  setReviewOwnerGroupExpanded: (groupId: string, expanded: boolean) => void;
+  toggleReviewRepository: (repositoryId: string) => void;
+  setReviewRepositoryExpanded: (repositoryId: string, expanded: boolean) => void;
+  toggleReviewHiddenSection: (sectionId: string) => void;
+  setReviewHiddenSectionExpanded: (sectionId: string, expanded: boolean) => void;
+  collapseReviewItems: (input: {
+    readonly ownerGroupIds: ReadonlyArray<string>;
+    readonly repositoryIds: ReadonlyArray<string>;
+    readonly hiddenSectionIds: ReadonlyArray<string>;
+  }) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
     draggedProjectIds: readonly string[],
@@ -436,6 +624,18 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
+  toggleReviewOwnerGroup: (groupId) => set((state) => toggleReviewOwnerGroup(state, groupId)),
+  setReviewOwnerGroupExpanded: (groupId, expanded) =>
+    set((state) => setReviewOwnerGroupExpanded(state, groupId, expanded)),
+  toggleReviewRepository: (repositoryId) =>
+    set((state) => toggleReviewRepository(state, repositoryId)),
+  setReviewRepositoryExpanded: (repositoryId, expanded) =>
+    set((state) => setReviewRepositoryExpanded(state, repositoryId, expanded)),
+  toggleReviewHiddenSection: (sectionId) =>
+    set((state) => toggleReviewHiddenSection(state, sectionId)),
+  setReviewHiddenSectionExpanded: (sectionId, expanded) =>
+    set((state) => setReviewHiddenSectionExpanded(state, sectionId, expanded)),
+  collapseReviewItems: (input) => set((state) => collapseReviewItems(state, input)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),

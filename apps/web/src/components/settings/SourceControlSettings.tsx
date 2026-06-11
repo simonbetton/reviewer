@@ -1,4 +1,5 @@
 import { ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
@@ -14,9 +15,11 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { usePrimaryEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
+import { reviewEnvironment } from "../../state/review";
 import { sourceControlEnvironment } from "../../state/sourceControl";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -49,6 +52,7 @@ import {
 } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { useReviewAppStore } from "../../reviewAppStore";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -69,6 +73,17 @@ const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
 
 const SOURCE_CONTROL_SKELETON_ROWS = ["primary", "secondary"] as const;
 const GIT_FETCH_INTERVAL_STEP_SECONDS = 5;
+const DEFAULT_REVIEW_OAUTH_EXPIRES_MS = 15 * 60 * 1000;
+
+interface ReviewOAuthNotice {
+  readonly message: string;
+  readonly verificationUri: string | null;
+  readonly userCode: string | null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 function durationToSeconds(duration: Duration.Duration): number {
   return Math.round(Duration.toMillis(duration) / 1_000);
@@ -439,6 +454,194 @@ function EmptySourceControlDiscovery({
   );
 }
 
+function PeerReviewProvidersSection() {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const snapshot = useReviewAppStore((store) => store.snapshot);
+  const setSnapshot = useReviewAppStore((store) => store.setSnapshot);
+  const [oauth, setOauth] = useState<ReviewOAuthNotice | null>(null);
+  const [pending, setPending] = useState(false);
+  const beginGitHubOAuth = useAtomCommand(reviewEnvironment.beginGitHubOAuth, {
+    reportFailure: false,
+  });
+  const completeGitHubOAuth = useAtomCommand(reviewEnvironment.completeGitHubOAuth, {
+    reportFailure: false,
+  });
+  const github = snapshot?.github ?? null;
+  const connectedUser = github?.status === "connected" ? github.user : null;
+
+  const beginOAuth = async () => {
+    if (primaryEnvironmentId === null) return;
+    setPending(true);
+    try {
+      const beginResult = await beginGitHubOAuth({
+        environmentId: primaryEnvironmentId,
+        input: {},
+      });
+      if (beginResult._tag !== "Success") {
+        setOauth({
+          message: String(squashAtomCommandFailure(beginResult)),
+          verificationUri: null,
+          userCode: null,
+        });
+        return;
+      }
+      const result = beginResult.value;
+      if (result.status === "not_configured") {
+        setOauth({
+          message: result.detail ?? "GitHub OAuth is not configured.",
+          verificationUri: null,
+          userCode: null,
+        });
+        return;
+      }
+      if (!result.deviceCode || !result.userCode || !result.verificationUri) {
+        setOauth({
+          message: result.detail ?? "GitHub OAuth did not return a device code.",
+          verificationUri: result.verificationUri,
+          userCode: result.userCode,
+        });
+        return;
+      }
+
+      setOauth({
+        message: "Waiting for GitHub authorization.",
+        verificationUri: result.verificationUri,
+        userCode: result.userCode,
+      });
+
+      const parsedExpiresAtMs = result.expiresAt ? Date.parse(result.expiresAt) : Number.NaN;
+      const expiresAtMs = Number.isFinite(parsedExpiresAtMs)
+        ? parsedExpiresAtMs
+        : Date.now() + DEFAULT_REVIEW_OAUTH_EXPIRES_MS;
+      const pollIntervalMs = Math.max(1, result.intervalSeconds) * 1000;
+      while (Date.now() < expiresAtMs) {
+        await sleep(pollIntervalMs);
+        const completeResult = await completeGitHubOAuth({
+          environmentId: primaryEnvironmentId,
+          input: { deviceCode: result.deviceCode },
+        });
+        if (completeResult._tag !== "Success") {
+          setOauth({
+            message: String(squashAtomCommandFailure(completeResult)),
+            verificationUri: result.verificationUri,
+            userCode: result.userCode,
+          });
+          return;
+        }
+        setSnapshot(completeResult.value);
+        if (completeResult.value.github.status === "connected") {
+          setOauth({
+            message: completeResult.value.github.user
+              ? `Connected as ${completeResult.value.github.user.login}.`
+              : "GitHub connected.",
+            verificationUri: null,
+            userCode: null,
+          });
+          return;
+        }
+      }
+
+      setOauth({
+        message: "GitHub device code expired. Start OAuth again to continue.",
+        verificationUri: null,
+        userCode: null,
+      });
+    } catch (error) {
+      setOauth({
+        message: error instanceof Error ? error.message : "GitHub OAuth failed.",
+        verificationUri: null,
+        userCode: null,
+      });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const statusLabel =
+    github?.status === "connected"
+      ? "Connected"
+      : github?.status === "pending"
+        ? "Pending"
+        : github?.status === "not_configured"
+          ? "Not configured"
+          : "Not connected";
+
+  return (
+    <SettingsSection title="Peer Review Providers">
+      <div className="px-4 py-3.5 sm:px-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="relative inline-flex size-5 shrink-0 items-center justify-center">
+                <GitHubIcon className="size-4.5 text-foreground/80" aria-hidden />
+                <span
+                  className={cn(
+                    "pointer-events-none absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-background",
+                    github?.status === "connected" ? "bg-success" : "bg-warning",
+                  )}
+                  aria-hidden
+                />
+              </span>
+              <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-foreground">
+                GitHub
+              </span>
+              <Badge variant={github?.status === "connected" ? "success" : "warning"} size="sm">
+                {statusLabel}
+              </Badge>
+            </div>
+            <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground/80">
+              {connectedUser ? (
+                <>
+                  <span>Posting peer reviews as</span>
+                  <RedactedAccount account={connectedUser.login} />
+                </>
+              ) : (
+                <span>
+                  Connect GitHub OAuth to sync review repositories and post approved agent reviews
+                  as your user.
+                </span>
+              )}
+            </p>
+            {github?.detail ? (
+              <p className="text-xs text-muted-foreground/80">{github.detail}</p>
+            ) : null}
+            {github?.scopes.length ? (
+              <p className="text-xs text-muted-foreground/60">Scopes: {github.scopes.join(", ")}</p>
+            ) : null}
+            {oauth ? (
+              <div className="mt-3 rounded-lg border border-border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                <div>{oauth.message}</div>
+                {oauth.verificationUri && oauth.userCode ? (
+                  <div className="mt-1.5">
+                    <a
+                      href={oauth.verificationUri}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-foreground underline underline-offset-4"
+                    >
+                      Open GitHub
+                    </a>{" "}
+                    and enter code{" "}
+                    <span className="font-mono text-foreground">{oauth.userCode}</span>.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending || !api}
+            onClick={() => void beginOAuth()}
+          >
+            {connectedUser ? "Reconnect" : "Connect"}
+          </Button>
+        </div>
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function SourceControlSettingsPanel() {
   const environmentId = usePrimaryEnvironment()?.environmentId ?? null;
   const discovery = useEnvironmentQuery(
@@ -495,6 +698,8 @@ export function SourceControlSettingsPanel() {
             </SettingsSection>
           ) : null}
 
+          <PeerReviewProvidersSection />
+
           {result.sourceControlProviders.length > 0 ? (
             <SettingsSection
               title="Source Control Providers"
@@ -513,6 +718,7 @@ export function SourceControlSettingsPanel() {
           onScan={handleScan}
         />
       )}
+      {!hasDiscoveryItems && !isInitialScanPending ? <PeerReviewProvidersSection /> : null}
     </SettingsPageContainer>
   );
 }

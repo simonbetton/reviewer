@@ -2,7 +2,7 @@
 
 > Branch: `cursor/github-peer-review-app-2937`
 > PR: https://github.com/simonbetton/reviewer/pull/1
-> Status: **Vertical slice complete; intelligence and persistence layers are stubbed**
+> Status: **Vertical slice complete; persistence, OAuth completion, GitHub file-backed runs, and GitHub review posting are implemented**
 
 This document is for the next agent or session. It describes what was built, what is intentionally incomplete, architectural decisions, and recommended next steps.
 
@@ -15,12 +15,15 @@ This document is for the next agent or session. It describes what was built, wha
 - **`/review` route** is the new default/home experience (authenticated users redirect from chat index).
 - **Left sidebar** (`ReviewSidebar`) shows personal and organization repo groups with open PRs, pinned state, 10-repo collapse with "More", and manual refresh.
 - **Main workspace** (`ReviewWorkspace`) shows PR inbox + right-side review pane (email-app layout).
-- **GitHub OAuth device flow** can be started from the UI (`beginGitHubOAuth` RPC).
+- **GitHub OAuth device flow** can be started from Source Control settings and is polled with `completeGitHubOAuth`.
 - **Inbox sync** fetches viewer, repos, and open PRs from GitHub REST API when a token is available.
+- **Workspace state** is persisted to `review-workspace.json`; OAuth tokens are persisted in `ServerSecretStore`.
+- **Background inbox sync** refreshes from the stored token every 60 seconds while connected.
 - **Pinning** for repos and PRs; **recent interaction** timestamps drive sort order.
 - **Skills UI** with four app-default skills plus user-installed skill registration.
 - **MCP connection records** can be added and associated with review runs.
-- **Agent review runs** produce structured `ReviewFinding` objects locally; **submit** marks them as posted by the connected GitHub user (local state only today).
+- **Review runs** fetch the selected PR's changed files from GitHub and produce structured `ReviewFinding` objects from file/path/patch signals.
+- **Submit** posts a top-level GitHub PR review comment through the Pull Request Reviews API as the connected GitHub user, then marks local run/findings as posted.
 
 ### Architecture (follows existing T3 Code patterns)
 
@@ -28,7 +31,7 @@ This document is for the next agent or session. It describes what was built, wha
 |-------|----------|-------|
 | Contracts | `packages/contracts/src/review.ts`, `rpc.ts`, `ipc.ts` | Schema-first types and RPC definitions |
 | Server service | `apps/server/src/review/ReviewWorkspace.ts` | Effect service; instantiated per WS RPC layer in `ws.ts` |
-| Pure logic | `apps/server/src/review/reviewWorkspaceLogic.ts` | Sorting, grouping, default skills, stub findings |
+| Pure logic | `apps/server/src/review/reviewWorkspaceLogic.ts` | Sorting, grouping, default skills, file-backed finding heuristics, GitHub review body |
 | Web store | `apps/web/src/reviewAppStore.ts` | Zustand; snapshot + selection state |
 | UI | `apps/web/src/components/review/*` | Sidebar + workspace |
 | Route | `apps/web/src/routes/review.tsx` | Thin route wrapper |
@@ -40,11 +43,12 @@ All passing at handoff time:
 - `bun fmt`
 - `bun lint` (10 pre-existing warnings, 0 errors)
 - `bun typecheck`
-- `bun run test` — 1026 passed, 4 skipped
+- `bun run test` — 1030 passed, 4 skipped
 
 New tests:
 
 - `apps/server/src/review/reviewWorkspaceLogic.test.ts`
+- `apps/server/src/review/ReviewWorkspace.test.ts`
 - `apps/web/src/reviewAppStore.test.ts`
 
 ---
@@ -61,17 +65,17 @@ The peer review app is a **new product domain** with its own contracts and servi
 
 `ReviewWorkspace.make()` is called inside the WebSocket RPC handler layer (`apps/server/src/ws.ts`), not merged into global `RuntimeCoreDependenciesLive`. Rationale: avoids leaking the service into unrelated server tests and bin entrypoints that don't need review context.
 
-### 3. In-memory state for the vertical slice
+### 3. Persisted review workspace state
 
-Review workspace state lives in a `Ref<PersistedReviewWorkspaceState>` with **no disk persistence yet**. The schema `PersistedReviewWorkspaceState` exists and is ready for JSON/SQLite persistence, but load/save was deferred to keep the first slice focused on UI + RPC wiring.
+Review workspace state lives in a `Ref<PersistedReviewWorkspaceState>` and is saved to `review-workspace.json` under the server state directory with atomic writes. The persisted schema is tolerant of older records via contract defaults for newly added fields.
 
 ### 4. GitHub OAuth via device flow
 
-Uses GitHub's device authorization grant. Requires `T3_GITHUB_OAUTH_CLIENT_ID` env var on the server. Token is held in an in-memory `Ref` after `completeGitHubOAuth`; not yet stored in `ServerSecretStore`.
+Uses GitHub's device authorization grant. Requires `T3_GITHUB_OAUTH_CLIENT_ID` env var on the server. Token is stored in `ServerSecretStore` after `completeGitHubOAuth` and reloaded when the review workspace service starts.
 
 ### 5. Reviews authored by GitHub user (design intent)
 
-Agent produces **local draft findings**. `submitRun` is designed to post to GitHub **as the connected user**, not as a bot. Current implementation only updates local `ReviewRun.status` to `"posted"` — no GitHub API call yet.
+Review runs produce **local draft findings**. `submitRun` posts a review-level GitHub comment **as the connected user**, not as a bot, using `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews` with `event: "COMMENT"`.
 
 ### 6. Default skills are code-defined
 
@@ -83,36 +87,27 @@ Agent produces **local draft findings**. `submitRun` is designed to post to GitH
 
 Priority order for the next session:
 
-### P0 — Make the app usable across restarts
+### P0 — Real agent review intelligence
 
 | Item | File(s) | Notes |
 |------|---------|-------|
-| Persist workspace state | `ReviewWorkspace.ts` | Load/save `review-workspace.json` under `config.stateDir`; use `atomicWrite` pattern from existing server code |
-| Persist OAuth token | `ReviewWorkspace.ts` | Store token in `ServerSecretStore` (`apps/server/src/auth/`), reload on startup |
-| Complete OAuth device flow in UI | `ReviewWorkspace.tsx` | UI calls `beginGitHubOAuth` but never polls `completeGitHubOAuth` with `deviceCode` |
-| Background inbox polling | `ReviewWorkspace.ts` or reactor | Periodic `refreshInboxWithToken` (e.g. every 60s) while connected |
-
-### P1 — Real agent review intelligence
-
-| Item | File(s) | Notes |
-|------|---------|-------|
-| Replace stub findings | `reviewWorkspaceLogic.ts` `createReviewFindings` | Wire to Codex/provider runtime; fetch PR diff/files from GitHub |
-| Streaming review runs | contracts + server + UI | `startRun` currently completes synchronously with placeholder findings |
+| Replace heuristic findings | `reviewWorkspaceLogic.ts` `createReviewFindings` | Wire to Codex/provider runtime for semantic review; current run uses real GitHub file list and patch snippets |
+| Streaming review runs | contracts + server + UI | `startRun` currently completes synchronously after fetching PR files |
 | Skill prompt injection | `ReviewWorkspace.ts` `startRun` | Load skill definitions (default + installed) into agent context |
 | MCP runtime wiring | new module | Spawn/manage MCP processes from `ReviewMcpConnection` records; pass tools to agent |
 | Execute `npx skills install` | `runSkillsInstaller` in `ReviewWorkspace.ts` | Use `VcsProcess` with timeout and bounded output |
 
-### P2 — GitHub integration depth
+### P1 — GitHub integration depth
 
 | Item | File(s) | Notes |
 |------|---------|-------|
-| Post review to GitHub | `submitRun` | `POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews` with user's token |
+| Inline review comments | `submitRun` | Current implementation posts a review-level comment; inline comments need diff positions |
 | Fetch human reviews | new RPC + UI section | `GET .../pulls/{n}/reviews` and review comments |
 | Rich PR metadata | `refreshInboxWithToken` | Populate `additions`, `deletions`, `changedFiles`, `reviewDecision`, `checksState` |
 | Pagination | `refreshInboxWithToken` | `parseGitHubLinkNext` exists but is unused |
 | Reuse SourceControlProvider | `GitHubSourceControlProvider.ts` | Align with existing `gh` CLI layer where appropriate |
 
-### P3 — UX polish
+### P2 — UX polish
 
 | Item | Notes |
 |------|-------|
@@ -158,21 +153,20 @@ apps/web/src/routes/review.tsx
 
 ## Blockers and Known Issues
 
-1. **OAuth incomplete in UI** — User sees device code but app never calls `completeGitHubOAuth`. Without this, inbox stays empty unless token is injected another way.
-2. **State lost on server restart** — All repos, PRs, pins, runs, and tokens are in-memory only.
-3. **Agent reviews are placeholders** — Findings are generated from category names, not PR content.
-4. **Submit does not hit GitHub** — "Posted as user" is local metadata only.
-5. **Chat app still present** — `/review` is default but chat routes remain; no product decision yet on removing or hiding chat entirely.
+1. **Review intelligence is heuristic** — Findings use real GitHub changed files and patch snippets, but are not yet produced by Codex/provider semantic analysis.
+2. **Submit posts review-level comments only** — GitHub receives a Pull Request Review with `event: "COMMENT"` and a markdown body; inline comments need diff positions.
+3. **Skill installer is still stubbed** — User skill records are saved, but `npx skills install` is not executed yet.
+4. **Chat app still present** — `/review` is default but chat routes remain; no product decision yet on removing or hiding chat entirely.
 
 ---
 
 ## Suggested Next Session Plan
 
-1. **Persistence + OAuth completion** — Highest user-visible impact; unblocks real GitHub testing.
-2. **PR diff fetch + provider-backed review run** — Use existing Codex/provider infrastructure from `apps/server/src/provider/`.
-3. **GitHub review submission** — Implement `submitRun` against GitHub Reviews API.
-4. **Human reviews panel** — Fetch and display existing PR reviews/comments.
-5. **Integration tests** — Mock GitHub API; test OAuth → sync → run → submit flow.
+1. **Provider-backed review run** — Use existing Codex/provider infrastructure from `apps/server/src/provider/` to replace file-signal heuristics.
+2. **Inline GitHub comments** — Map findings to diff positions and include review comments in the Reviews API request.
+3. **Human reviews panel** — Fetch and display existing PR reviews/comments.
+4. **Skill installer + prompt injection** — Execute `npx skills install` and load skill instructions into review prompts.
+5. **Pagination + richer metadata** — Page through repos/files and fetch checks/review decision/diff stats where GitHub REST does not include enough data.
 
 ---
 

@@ -2,6 +2,11 @@ import { TextGenerationError } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const isTextGenerationError = Schema.is(TextGenerationError);
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
 export function toJsonSchemaObject(schema: Schema.Top): unknown {
@@ -10,6 +15,59 @@ export function toJsonSchemaObject(schema: Schema.Top): unknown {
     return { ...document.schema, $defs: document.definitions };
   }
   return document.schema;
+}
+
+/**
+ * OpenAI/Codex strict structured output rejects object schemas where a key in
+ * `properties` is absent from `required`. Return dotted property paths for any
+ * violations so callers can fail before spawning a provider CLI.
+ */
+export function findJsonSchemaMissingRequiredPropertyPaths(schema: unknown): ReadonlyArray<string> {
+  const missing: string[] = [];
+
+  const visitSchemaMap = (value: unknown, path: ReadonlyArray<string>) => {
+    if (!isJsonObject(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      visit(child, [...path, key]);
+    }
+  };
+
+  const visitCombinators = (value: unknown, path: ReadonlyArray<string>) => {
+    if (!Array.isArray(value)) return;
+    value.forEach((child) => visit(child, path));
+  };
+
+  const visit = (value: unknown, path: ReadonlyArray<string>) => {
+    if (!isJsonObject(value)) return;
+
+    const properties = isJsonObject(value.properties) ? value.properties : null;
+    if (properties) {
+      const required = Array.isArray(value.required)
+        ? new Set(value.required.filter((entry): entry is string => typeof entry === "string"))
+        : new Set<string>();
+
+      for (const [key, child] of Object.entries(properties)) {
+        const childPath = [...path, key];
+        if (!required.has(key)) {
+          missing.push(childPath.join("."));
+        }
+        visit(child, childPath);
+      }
+    }
+
+    if ("items" in value) {
+      visit(value.items, [...path, "items"]);
+    }
+
+    visitCombinators(value.anyOf, path);
+    visitCombinators(value.oneOf, path);
+    visitCombinators(value.allOf, path);
+    visitSchemaMap(value.$defs, [...path, "$defs"]);
+    visitSchemaMap(value.definitions, [...path, "definitions"]);
+  };
+
+  visit(schema, []);
+  return missing;
 }
 
 /** Truncate a text section to `maxChars`, appending a `[truncated]` marker when needed. */

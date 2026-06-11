@@ -143,6 +143,7 @@ import {
 } from "./sourceControl.ts";
 import {
   REVIEW_WS_METHODS,
+  ReviewDeleteSummaryDraftInput,
   ReviewGitHubBeginOAuthInput,
   ReviewGitHubBeginOAuthResult,
   ReviewGitHubCompleteOAuthInput,
@@ -150,16 +151,22 @@ import {
   ReviewInstallSkillInput,
   ReviewInstallerResult,
   ReviewMcpConnection,
-  ReviewRecordInteractionInput,
+  ReviewPostInlineCardInput,
+  ReviewPostSummaryCardInput,
+  ReviewRefreshPullRequestDetailInput,
   ReviewRemoveMcpConnectionInput,
   ReviewRemoveSkillInput,
   ReviewRun,
+  ReviewSendChatMessageInput,
+  ReviewSetPullRequestHiddenInput,
   ReviewSetPullRequestPinnedInput,
-  ReviewSetRepositoryPinnedInput,
+  ReviewSetRepositoryHiddenInput,
   ReviewSetSkillEnabledInput,
   ReviewSkill,
   ReviewStartRunInput,
   ReviewSubmitRunInput,
+  ReviewUpdateCommentDraftInput,
+  ReviewUpdateSummaryDraftInput,
   ReviewUpsertMcpConnectionInput,
   ReviewWorkspaceError,
 } from "./review.ts";
@@ -424,6 +431,18 @@ export const WsReviewSetPullRequestPinnedRpc = Rpc.make(REVIEW_WS_METHODS.setPul
   error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
 });
 
+export const WsReviewSetRepositoryHiddenRpc = Rpc.make(REVIEW_WS_METHODS.setRepositoryHidden, {
+  payload: ReviewSetRepositoryHiddenInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewSetPullRequestHiddenRpc = Rpc.make(REVIEW_WS_METHODS.setPullRequestHidden, {
+  payload: ReviewSetPullRequestHiddenInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
 export const WsReviewUpsertMcpConnectionRpc = Rpc.make(REVIEW_WS_METHODS.upsertMcpConnection, {
   payload: ReviewUpsertMcpConnectionInput,
   success: ReviewMcpConnection,
@@ -454,6 +473,51 @@ export const WsReviewSetSkillEnabledRpc = Rpc.make(REVIEW_WS_METHODS.setSkillEna
 
 export const WsReviewRemoveSkillRpc = Rpc.make(REVIEW_WS_METHODS.removeSkill, {
   payload: ReviewRemoveSkillInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewRefreshPullRequestDetailRpc = Rpc.make(
+  REVIEW_WS_METHODS.refreshPullRequestDetail,
+  {
+    payload: ReviewRefreshPullRequestDetailInput,
+    success: ReviewInboxSnapshot,
+    error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsReviewUpdateSummaryDraftRpc = Rpc.make(REVIEW_WS_METHODS.updateSummaryDraft, {
+  payload: ReviewUpdateSummaryDraftInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewDeleteSummaryDraftRpc = Rpc.make(REVIEW_WS_METHODS.deleteSummaryDraft, {
+  payload: ReviewDeleteSummaryDraftInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewUpdateCommentDraftRpc = Rpc.make(REVIEW_WS_METHODS.updateCommentDraft, {
+  payload: ReviewUpdateCommentDraftInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewSendChatMessageRpc = Rpc.make(REVIEW_WS_METHODS.sendChatMessage, {
+  payload: ReviewSendChatMessageInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewPostSummaryCardRpc = Rpc.make(REVIEW_WS_METHODS.postSummaryCard, {
+  payload: ReviewPostSummaryCardInput,
+  success: ReviewInboxSnapshot,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewPostInlineCardRpc = Rpc.make(REVIEW_WS_METHODS.postInlineCard, {
+  payload: ReviewPostInlineCardInput,
   success: ReviewInboxSnapshot,
   error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
 });
@@ -821,14 +885,21 @@ export const WsRpcGroup = RpcGroup.make(
   WsReviewGitHubBeginOAuthRpc,
   WsReviewGitHubCompleteOAuthRpc,
   WsReviewRefreshInboxRpc,
-  WsReviewRecordInteractionRpc,
-  WsReviewSetRepositoryPinnedRpc,
   WsReviewSetPullRequestPinnedRpc,
+  WsReviewSetRepositoryHiddenRpc,
+  WsReviewSetPullRequestHiddenRpc,
   WsReviewUpsertMcpConnectionRpc,
   WsReviewRemoveMcpConnectionRpc,
   WsReviewInstallSkillRpc,
   WsReviewSetSkillEnabledRpc,
   WsReviewRemoveSkillRpc,
+  WsReviewRefreshPullRequestDetailRpc,
+  WsReviewUpdateSummaryDraftRpc,
+  WsReviewDeleteSummaryDraftRpc,
+  WsReviewUpdateCommentDraftRpc,
+  WsReviewSendChatMessageRpc,
+  WsReviewPostSummaryCardRpc,
+  WsReviewPostInlineCardRpc,
   WsReviewStartRunRpc,
   WsReviewSubmitRunRpc,
   WsProjectsSearchEntriesRpc,

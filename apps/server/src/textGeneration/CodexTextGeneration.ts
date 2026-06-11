@@ -23,6 +23,7 @@ import {
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
+  findJsonSchemaMissingRequiredPropertyPaths,
   normalizeCliError,
   sanitizeCommitSubject,
   sanitizePrTitle,
@@ -93,11 +94,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
 
   const encodeJsonForOperation = (
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle",
+    operation: string,
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -112,11 +109,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     );
 
   const materializeImageAttachments = Effect.fn("materializeImageAttachments")(function* (
-    _operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle",
+    _operation: string,
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -154,11 +147,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     cleanupPaths = [],
     modelSelection,
   }: {
-    operation:
-      | "generateCommitMessage"
-      | "generatePrContent"
-      | "generateBranchName"
-      | "generateThreadTitle";
+    operation: string;
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -166,10 +155,16 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
-    const schemaJson = yield* encodeJsonForOperation(
-      operation,
-      toJsonSchemaObject(outputSchemaJson),
-    );
+    const outputJsonSchema = toJsonSchemaObject(outputSchemaJson);
+    const missingRequiredPaths = findJsonSchemaMissingRequiredPropertyPaths(outputJsonSchema);
+    if (missingRequiredPaths.length > 0) {
+      return yield* new TextGenerationError({
+        operation,
+        detail: `Structured output schema is not Codex-compatible; object property '${missingRequiredPaths[0]}' is missing from required.`,
+      });
+    }
+
+    const schemaJson = yield* encodeJsonForOperation(operation, outputJsonSchema);
     const schemaPath = yield* writeTempFile(operation, "codex-schema", schemaJson);
     const outputPath = yield* writeTempFile(operation, "codex-output", "");
 
@@ -395,10 +390,26 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateStructured: TextGeneration.TextGeneration["Service"]["generateStructured"] = (
+    input,
+  ) =>
+    Effect.gen(function* () {
+      const { imagePaths } = yield* materializeImageAttachments(input.operation, input.attachments);
+      return yield* runCodexJson({
+        operation: input.operation,
+        cwd: input.cwd,
+        prompt: input.prompt,
+        outputSchemaJson: input.outputSchema,
+        imagePaths,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateStructured,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

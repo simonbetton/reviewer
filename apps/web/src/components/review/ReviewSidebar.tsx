@@ -1,10 +1,6 @@
-import { GitPullRequestIcon, RefreshCwIcon, StarIcon } from "lucide-react";
-import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo, useState } from "react";
+import { GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import type { EnvironmentId } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
 
 import { useReviewAppStore } from "../../reviewAppStore";
 import { reviewEnvironment } from "../../state/review";
@@ -20,35 +16,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../ui/sidebar";
+import { ReviewDataSubscription } from "./ReviewDataSubscription";
 
 const COLLAPSED_REPO_LIMIT = 10;
-
-export function ReviewDataSubscription() {
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-
-  if (primaryEnvironmentId === null) return null;
-
-  return <ReviewEnvironmentDataSubscription environmentId={primaryEnvironmentId} />;
-}
-
-function ReviewEnvironmentDataSubscription({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const setSnapshot = useReviewAppStore((store) => store.setSnapshot);
-  const snapshotResult = useAtomValue(reviewEnvironment.snapshot({ environmentId, input: {} }));
-  const streamedSnapshotResult = useAtomValue(
-    reviewEnvironment.snapshots({ environmentId, input: {} }),
-  );
-
-  useEffect(() => {
-    const snapshot =
-      Option.getOrNull(AsyncResult.value(streamedSnapshotResult)) ??
-      Option.getOrNull(AsyncResult.value(snapshotResult));
-    if (snapshot !== null) {
-      setSnapshot(snapshot);
-    }
-  }, [setSnapshot, snapshotResult, streamedSnapshotResult]);
-
-  return null;
-}
 
 export function ReviewSidebar() {
   const navigate = useNavigate();
@@ -139,7 +109,6 @@ export function ReviewSidebar() {
                         void navigate({ to: "/review" });
                       }}
                     >
-                      {repo.pinned ? <StarIcon className="size-3.5 fill-current" /> : null}
                       <span className="truncate">{repo.name}</span>
                       <Badge size="sm" variant="secondary" className="ml-auto">
                         {repo.openPullRequestCount}

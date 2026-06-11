@@ -1,8 +1,7 @@
 import { useEffect, type ReactNode } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 
 import ThreadSidebar from "./Sidebar";
-import { ReviewSidebar } from "./review/ReviewSidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
@@ -10,9 +9,6 @@ const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const sidebar =
-    pathname === "/" || pathname.startsWith("/review") ? <ReviewSidebar /> : <ThreadSidebar />;
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -44,7 +40,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {sidebar}
+        <ThreadSidebar />
         <SidebarRail />
       </Sidebar>
       {children}

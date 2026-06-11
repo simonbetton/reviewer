@@ -602,4 +602,36 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
+
+  it.effect("rejects non-strict structured schemas before spawning codex", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({ required: "ignored" }),
+        exitCode: 1,
+        stderr: "codex binary should not run",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration
+            .generateStructured({
+              cwd: process.cwd(),
+              operation: "strictSchemaTest",
+              prompt: "Return JSON.",
+              outputSchema: Schema.Struct({
+                required: Schema.String,
+                optional: Schema.optional(Schema.String),
+              }),
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure).toBeInstanceOf(TextGenerationError);
+            expect(result.failure.message).toContain("optional");
+            expect(result.failure.message).not.toContain("codex binary should not run");
+          }
+        }),
+    ),
+  );
 });

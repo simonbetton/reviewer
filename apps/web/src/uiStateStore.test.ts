@@ -2,6 +2,7 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  collapseReviewItems,
   legacyProjectCwdPreferenceKey,
   markThreadUnread,
   markThreadVisited,
@@ -13,7 +14,13 @@ import {
   resolveProjectExpanded,
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
+  setReviewHiddenSectionExpanded,
+  setReviewOwnerGroupExpanded,
+  setReviewRepositoryExpanded,
   setThreadChangedFilesExpanded,
+  toggleReviewHiddenSection,
+  toggleReviewOwnerGroup,
+  toggleReviewRepository,
   type UiState,
 } from "./uiStateStore";
 
@@ -24,6 +31,9 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
+    reviewOwnerGroupExpandedById: {},
+    reviewRepositoryExpandedById: {},
+    reviewHiddenSectionExpandedById: {},
     ...overrides,
   };
 }
@@ -140,6 +150,67 @@ describe("uiStateStore pure functions", () => {
       defaultAdvertisedEndpointKey: null,
     });
   });
+
+  it("toggles review repository expansion independently from projects", () => {
+    const collapsed = toggleReviewRepository(makeUiState(), "github:owner/repo");
+    const expanded = toggleReviewRepository(collapsed, "github:owner/repo");
+
+    expect(collapsed.reviewRepositoryExpandedById).toEqual({
+      "github:owner/repo": false,
+    });
+    expect(expanded.reviewRepositoryExpandedById).toEqual({});
+    expect(expanded.projectExpandedById).toEqual({});
+  });
+
+  it("toggles review owner group expansion independently from repositories", () => {
+    const collapsed = toggleReviewOwnerGroup(makeUiState(), "personal:owner");
+    const expanded = toggleReviewOwnerGroup(collapsed, "personal:owner");
+
+    expect(collapsed.reviewOwnerGroupExpandedById).toEqual({
+      "personal:owner": false,
+    });
+    expect(expanded.reviewOwnerGroupExpandedById).toEqual({});
+    expect(expanded.reviewRepositoryExpandedById).toEqual({});
+  });
+
+  it("stores expanded hidden review sections because they default to collapsed", () => {
+    const expanded = toggleReviewHiddenSection(makeUiState(), "repo:github:owner/repo");
+    const collapsed = setReviewHiddenSectionExpanded(expanded, "repo:github:owner/repo", false);
+
+    expect(expanded.reviewHiddenSectionExpandedById).toEqual({
+      "repo:github:owner/repo": true,
+    });
+    expect(collapsed.reviewHiddenSectionExpandedById).toEqual({});
+  });
+
+  it("collapseReviewItems collapses owners, repositories, and hidden sections", () => {
+    const initialState = makeUiState({
+      reviewOwnerGroupExpandedById: {
+        "personal:owner": true,
+      },
+      reviewRepositoryExpandedById: {
+        "github:owner/repo": true,
+      },
+      reviewHiddenSectionExpandedById: {
+        "owner:personal:owner": true,
+        "repo:github:owner/repo": true,
+      },
+    });
+
+    const next = collapseReviewItems(initialState, {
+      ownerGroupIds: ["personal:owner"],
+      repositoryIds: ["github:owner/repo"],
+      hiddenSectionIds: ["owner:personal:owner", "repo:github:owner/repo"],
+    });
+
+    expect(next.reviewOwnerGroupExpandedById).toEqual({
+      "personal:owner": false,
+    });
+    expect(next.reviewRepositoryExpandedById).toEqual({
+      "github:owner/repo": false,
+    });
+    expect(next.reviewHiddenSectionExpandedById).toEqual({});
+  });
 });
 
 describe("parsePersistedState", () => {
@@ -161,6 +232,9 @@ describe("parsePersistedState", () => {
           "turn-2": true,
         },
       },
+      collapsedReviewOwnerGroupIds: ["personal:owner", ""],
+      collapsedReviewRepositoryIds: ["github:owner/repo"],
+      expandedReviewHiddenSectionIds: ["repo:github:owner/repo"],
     });
 
     expect(parsed).toEqual({
@@ -176,6 +250,15 @@ describe("parsePersistedState", () => {
         "environment:thread-1": {
           "turn-1": false,
         },
+      },
+      reviewOwnerGroupExpandedById: {
+        "personal:owner": false,
+      },
+      reviewRepositoryExpandedById: {
+        "github:owner/repo": false,
+      },
+      reviewHiddenSectionExpandedById: {
+        "repo:github:owner/repo": true,
       },
     });
   });
@@ -262,6 +345,15 @@ describe("uiStateStore persistence", () => {
         },
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      reviewOwnerGroupExpandedById: {
+        "personal:owner": false,
+      },
+      reviewRepositoryExpandedById: {
+        "github:owner/repo": false,
+      },
+      reviewHiddenSectionExpandedById: {
+        "repo:github:owner/repo": true,
+      },
     });
 
     persistState(state);
@@ -277,6 +369,9 @@ describe("uiStateStore persistence", () => {
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
+      collapsedReviewOwnerGroupIds: ["personal:owner"],
+      collapsedReviewRepositoryIds: ["github:owner/repo"],
+      expandedReviewHiddenSectionIds: ["repo:github:owner/repo"],
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {

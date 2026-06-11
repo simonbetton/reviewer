@@ -114,6 +114,8 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
+import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -448,7 +450,10 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
-      const reviewWorkspace = yield* ReviewWorkspace.make();
+      const textGeneration = yield* TextGeneration;
+      const reviewWorkspace = yield* ReviewWorkspace.make({ textGeneration }).pipe(
+        Effect.provide(ServerSecretStore.layer),
+      );
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -1366,26 +1371,26 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
           observeRpcEffect(REVIEW_WS_METHODS.refreshInbox, reviewWorkspace.refreshInbox, {
             "rpc.aggregate": "review",
           }),
-        [REVIEW_WS_METHODS.recordInteraction]: (input) =>
-          observeRpcEffect(
-            REVIEW_WS_METHODS.recordInteraction,
-            reviewWorkspace.recordInteraction(input),
-            {
-              "rpc.aggregate": "review",
-            },
-          ),
-        [REVIEW_WS_METHODS.setRepositoryPinned]: (input) =>
-          observeRpcEffect(
-            REVIEW_WS_METHODS.setRepositoryPinned,
-            reviewWorkspace.setRepositoryPinned(input),
-            {
-              "rpc.aggregate": "review",
-            },
-          ),
         [REVIEW_WS_METHODS.setPullRequestPinned]: (input) =>
           observeRpcEffect(
             REVIEW_WS_METHODS.setPullRequestPinned,
             reviewWorkspace.setPullRequestPinned(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.setRepositoryHidden]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.setRepositoryHidden,
+            reviewWorkspace.setRepositoryHidden(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.setPullRequestHidden]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.setPullRequestHidden,
+            reviewWorkspace.setPullRequestHidden(input),
             {
               "rpc.aggregate": "review",
             },
@@ -1422,6 +1427,62 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
           observeRpcEffect(REVIEW_WS_METHODS.removeSkill, reviewWorkspace.removeSkill(input), {
             "rpc.aggregate": "review",
           }),
+        [REVIEW_WS_METHODS.refreshPullRequestDetail]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.refreshPullRequestDetail,
+            reviewWorkspace.refreshPullRequestDetail(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.updateSummaryDraft]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.updateSummaryDraft,
+            reviewWorkspace.updateSummaryDraft(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.deleteSummaryDraft]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.deleteSummaryDraft,
+            reviewWorkspace.deleteSummaryDraft(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.updateCommentDraft]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.updateCommentDraft,
+            reviewWorkspace.updateCommentDraft(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.sendChatMessage]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.sendChatMessage,
+            reviewWorkspace.sendChatMessage(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.postSummaryCard]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.postSummaryCard,
+            reviewWorkspace.postSummaryCard(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.postInlineCard]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.postInlineCard,
+            reviewWorkspace.postInlineCard(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
         [REVIEW_WS_METHODS.startRun]: (input) =>
           observeRpcEffect(REVIEW_WS_METHODS.startRun, reviewWorkspace.startRun(input), {
             "rpc.aggregate": "review",

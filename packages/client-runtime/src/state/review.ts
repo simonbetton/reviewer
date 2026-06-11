@@ -45,6 +45,14 @@ export function createReviewEnvironmentAtoms<R, E>(
       label: "environment-data:review:set-pull-request-pinned",
       tag: REVIEW_WS_METHODS.setPullRequestPinned,
     }),
+    setRepositoryHidden: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:set-repository-hidden",
+      tag: REVIEW_WS_METHODS.setRepositoryHidden,
+    }),
+    setPullRequestHidden: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:set-pull-request-hidden",
+      tag: REVIEW_WS_METHODS.setPullRequestHidden,
+    }),
     upsertMcpConnection: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:upsert-mcp-connection",
       tag: REVIEW_WS_METHODS.upsertMcpConnection,
@@ -64,6 +72,34 @@ export function createReviewEnvironmentAtoms<R, E>(
     removeSkill: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:remove-skill",
       tag: REVIEW_WS_METHODS.removeSkill,
+    }),
+    refreshPullRequestDetail: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:refresh-pull-request-detail",
+      tag: REVIEW_WS_METHODS.refreshPullRequestDetail,
+    }),
+    updateSummaryDraft: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:update-summary-draft",
+      tag: REVIEW_WS_METHODS.updateSummaryDraft,
+    }),
+    deleteSummaryDraft: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:delete-summary-draft",
+      tag: REVIEW_WS_METHODS.deleteSummaryDraft,
+    }),
+    updateCommentDraft: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:update-comment-draft",
+      tag: REVIEW_WS_METHODS.updateCommentDraft,
+    }),
+    sendChatMessage: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:send-chat-message",
+      tag: REVIEW_WS_METHODS.sendChatMessage,
+    }),
+    postSummaryCard: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:post-summary-card",
+      tag: REVIEW_WS_METHODS.postSummaryCard,
+    }),
+    postInlineCard: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:post-inline-card",
+      tag: REVIEW_WS_METHODS.postInlineCard,
     }),
     startRun: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:start-run",

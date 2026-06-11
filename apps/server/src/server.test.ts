@@ -75,6 +75,8 @@ import { makeRoutesLayer } from "./server.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
+import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
@@ -725,6 +727,20 @@ const buildAppUnderTest = (options?: {
               diff: "",
             }),
           ...options?.layers?.checkpointDiffQuery,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TextGeneration)({
+          generateCommitMessage: () =>
+            Effect.die("generateCommitMessage should not be called in router tests"),
+          generatePrContent: () =>
+            Effect.die("generatePrContent should not be called in router tests"),
+          generateBranchName: () =>
+            Effect.die("generateBranchName should not be called in router tests"),
+          generateThreadTitle: () =>
+            Effect.die("generateThreadTitle should not be called in router tests"),
+          generateStructured: () =>
+            Effect.die("generateStructured should not be called in router tests"),
         }),
       ),
     );
