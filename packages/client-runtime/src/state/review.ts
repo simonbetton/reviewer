@@ -33,14 +33,6 @@ export function createReviewEnvironmentAtoms<R, E>(
       label: "environment-data:review:refresh-inbox",
       tag: REVIEW_WS_METHODS.refreshInbox,
     }),
-    recordInteraction: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:review:record-interaction",
-      tag: REVIEW_WS_METHODS.recordInteraction,
-    }),
-    setRepositoryPinned: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:review:set-repository-pinned",
-      tag: REVIEW_WS_METHODS.setRepositoryPinned,
-    }),
     setPullRequestPinned: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:set-pull-request-pinned",
       tag: REVIEW_WS_METHODS.setPullRequestPinned,
@@ -96,14 +88,6 @@ export function createReviewEnvironmentAtoms<R, E>(
     sendChatMessage: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:send-chat-message",
       tag: REVIEW_WS_METHODS.sendChatMessage,
-    }),
-    postSummaryCard: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:review:post-summary-card",
-      tag: REVIEW_WS_METHODS.postSummaryCard,
-    }),
-    postInlineCard: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:review:post-inline-card",
-      tag: REVIEW_WS_METHODS.postInlineCard,
     }),
     startRun: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:start-run",

@@ -631,7 +631,7 @@ function PeerReviewProvidersSection() {
           <Button
             size="sm"
             variant="outline"
-            disabled={pending || !api}
+            disabled={pending || primaryEnvironmentId === null}
             onClick={() => void beginOAuth()}
           >
             {connectedUser ? "Reconnect" : "Connect"}

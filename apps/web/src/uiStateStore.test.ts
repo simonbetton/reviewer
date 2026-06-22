@@ -15,8 +15,6 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectExpanded,
   setReviewHiddenSectionExpanded,
-  setReviewOwnerGroupExpanded,
-  setReviewRepositoryExpanded,
   setThreadChangedFilesExpanded,
   toggleReviewHiddenSection,
   toggleReviewOwnerGroup,

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
@@ -1087,8 +1087,8 @@ function createGeneratedChatResponse(input: {
   readonly userMessage: ReviewConversationMessage;
   readonly agentMessage: ReviewConversationMessage;
 } {
-  const userMessageId = `message-${randomUUID()}`;
-  const agentMessageId = `message-${randomUUID()}`;
+  const userMessageId = `message-${NodeCrypto.randomUUID()}`;
+  const agentMessageId = `message-${NodeCrypto.randomUUID()}`;
 
   return {
     userMessage: {
@@ -2021,7 +2021,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
         const at = yield* nowIso;
         let saved: ReviewMcpConnection | null = null;
         yield* updateState("mcp.upsert", (state) => {
-          const id = input.id ?? `mcp-${randomUUID()}`;
+          const id = input.id ?? `mcp-${NodeCrypto.randomUUID()}`;
           const existing = state.mcpConnections.find((connection) => connection.id === id);
           saved = {
             id,
@@ -2225,7 +2225,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
         const selectedModel = input.modelSelection;
         const shouldCreateDrafts = isExplicitReviewDraftRequest(input.message);
         if (shouldCreateDrafts && selectedModel && options?.textGeneration && detail) {
-          const runId = `run-${randomUUID()}`;
+          const runId = `run-${NodeCrypto.randomUUID()}`;
           const generatedArtifacts = yield* options.textGeneration
             .generateStructured({
               cwd: serverConfig.cwd,
@@ -2440,7 +2440,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
           );
         }
         const at = yield* nowIso;
-        const runId = `run-${randomUUID()}`;
+        const runId = `run-${NodeCrypto.randomUUID()}`;
         const detailResult = yield* readPullRequestReviewDetail({
           token,
           repository,

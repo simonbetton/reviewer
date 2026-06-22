@@ -29,9 +29,6 @@ export function ReviewSidebar() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [refreshing, setRefreshing] = useState(false);
   const refreshInbox = useAtomCommand(reviewEnvironment.refreshInbox, { reportFailure: false });
-  const recordInteraction = useAtomCommand(reviewEnvironment.recordInteraction, {
-    reportFailure: false,
-  });
 
   const groups = useMemo(() => snapshot?.groups ?? [], [snapshot]);
 
@@ -100,12 +97,6 @@ export function ReviewSidebar() {
                       isActive={repo.id === selectedRepositoryId}
                       onClick={() => {
                         selectRepository(repo.id);
-                        if (primaryEnvironmentId !== null) {
-                          void recordInteraction({
-                            environmentId: primaryEnvironmentId,
-                            input: { repositoryId: repo.id },
-                          });
-                        }
                         void navigate({ to: "/review" });
                       }}
                     >

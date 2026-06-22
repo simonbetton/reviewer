@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import type {
   ReviewCategory,
   ReviewCodeBlock,
@@ -641,7 +641,7 @@ export function createReviewChatResponse(input: {
   readonly userMessage: ReviewConversationMessage;
   readonly agentMessage: ReviewConversationMessage;
 } {
-  const messageIdBase = `chat-${randomUUID()}`;
+  const messageIdBase = `chat-${NodeCrypto.randomUUID()}`;
   const activeDraft = input.commentDrafts.find((draft) => draft.status === "draft") ?? null;
   const responseLines = [
     `I reviewed that against PR #${input.pullRequest.number}.`,

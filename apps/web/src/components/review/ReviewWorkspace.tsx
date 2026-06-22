@@ -27,6 +27,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useAtomValue } from "@effect/atom-react";
 import { type LegendListRef } from "@legendapp/list/react";
 import type {
   ModelSelection,
@@ -42,13 +43,13 @@ import type {
   ReviewSubmitEvent,
   ServerProvider,
 } from "@t3tools/contracts";
-import { EnvironmentId, MessageId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import {
   type AtomCommandResult,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { createModelSelection } from "@t3tools/shared/model";
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useNavigate } from "@tanstack/react-router";
 import type { TimestampFormat, UnifiedSettings } from "@t3tools/contracts/settings";
 
@@ -60,12 +61,13 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import { type ComposerImageAttachment, useComposerDraftStore } from "../../composerDraftStore";
+import type { ElementContextDraft } from "../../lib/elementContext";
 import type { TerminalContextDraft } from "../../lib/terminalContext";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useMountEffect } from "../../hooks/useMountEffect";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
-import { useSettings } from "../../hooks/useSettings";
+import { usePrimarySettings } from "../../hooks/useSettings";
 import { useTheme } from "../../hooks/useTheme";
 import {
   buildReviewPullRequestRouteParams,
@@ -83,7 +85,7 @@ import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
-import { useServerKeybindings, useServerProviders } from "../../rpc/serverState";
+import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../../state/server";
 import { useUiStateStore } from "../../uiStateStore";
 import { isElectron } from "../../env";
 import { cn, randomUUID } from "../../lib/utils";
@@ -1251,20 +1253,15 @@ function ReviewEventSegmentedControl({
   readonly onChange: (event: ReviewSubmitEvent) => void;
 }) {
   return (
-    <div
-      role="radiogroup"
-      aria-label="GitHub review post outcome"
-      className={cn("grid min-w-0 grid-cols-3 gap-1", className)}
-    >
+    <div className={cn("grid min-w-0 grid-cols-3 gap-1", className)}>
       {options.map((option) => {
         const selected = value === option.event;
         return (
           <button
             key={option.event}
             type="button"
-            role="radio"
             aria-label={option.ariaLabel}
-            aria-checked={selected}
+            aria-pressed={selected}
             title={option.detail}
             className={cn(
               "h-7 min-w-0 rounded-lg px-2 text-center text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
@@ -1530,8 +1527,9 @@ function reviewConversationChatMessages(
     id: MessageId.make(message.id),
     role: message.role === "agent" ? "assistant" : "user",
     text: message.body,
+    turnId: TurnId.make(`review-${message.id}`),
     createdAt: message.createdAt,
-    completedAt: message.createdAt,
+    updatedAt: message.createdAt,
     streaming: false,
   }));
 
@@ -1545,15 +1543,18 @@ function reviewConversationChatMessages(
       id: MessageId.make(`${pendingMessage.id}:user`),
       role: "user",
       text: pendingMessage.body,
+      turnId: TurnId.make(`${pendingMessage.id}:turn`),
       createdAt: pendingMessage.createdAt,
-      completedAt: pendingMessage.createdAt,
+      updatedAt: pendingMessage.createdAt,
       streaming: false,
     } satisfies ChatMessage,
     {
       id: MessageId.make(`${pendingMessage.id}:agent`),
       role: "assistant",
       text: "Reviewing the PR diff, existing feedback, and local drafts...",
+      turnId: TurnId.make(`${pendingMessage.id}:turn`),
       createdAt: pendingMessage.createdAt,
+      updatedAt: pendingMessage.createdAt,
       streaming: true,
     } satisfies ChatMessage,
   ];
@@ -1594,6 +1595,7 @@ function ReviewChatComposer({
   const promptRef = useRef("");
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
+  const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
   const composerRef = useRef<ChatComposerHandle | null>(null);
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
@@ -1689,6 +1691,7 @@ function ReviewChatComposer({
         promptRef={promptRef}
         composerImagesRef={composerImagesRef}
         composerTerminalContextsRef={composerTerminalContextsRef}
+        composerElementContextsRef={composerElementContextsRef}
         shouldAutoScrollRef={shouldAutoScrollRef}
         scheduleStickToBottom={scrollToEnd}
         onSend={sendComposerMessage}
@@ -2374,9 +2377,9 @@ export default function ReviewWorkspace({
     useState<ReviewPendingChatMessage | null>(null);
   const [listWidth, setListWidth] = useState(readStoredReviewPrListWidth);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
-  const serverProviders = useServerProviders();
-  const keybindings = useServerKeybindings();
-  const settings = useSettings();
+  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const settings = usePrimarySettings();
   const { resolvedTheme } = useTheme();
   const setPullRequestPinned = useAtomCommand(reviewEnvironment.setPullRequestPinned, {
     reportFailure: false,
@@ -2400,12 +2403,6 @@ export default function ReviewWorkspace({
     reportFailure: false,
   });
   const sendReviewChatMessage = useAtomCommand(reviewEnvironment.sendChatMessage, {
-    reportFailure: false,
-  });
-  const postReviewSummaryCard = useAtomCommand(reviewEnvironment.postSummaryCard, {
-    reportFailure: false,
-  });
-  const postReviewInlineCard = useAtomCommand(reviewEnvironment.postInlineCard, {
     reportFailure: false,
   });
   const startReviewRun = useAtomCommand(reviewEnvironment.startRun, { reportFailure: false });
@@ -2668,69 +2665,6 @@ export default function ReviewWorkspace({
     }
   };
 
-  const postSummaryCard = async (postCard: ReviewPostCard, body: string) => {
-    if (primaryEnvironmentId === null || !selectedPullRequest) return;
-    try {
-      const next = unwrapCommandResult(
-        await postReviewSummaryCard(
-          reviewTarget(primaryEnvironmentId, {
-            postCardId: postCard.id,
-            body,
-          }),
-        ),
-      );
-      useReviewAppStore.getState().setSnapshot(next);
-      setReviewNotice({
-        pullRequestId: selectedPullRequest.id,
-        variant: "success",
-        title: "Summary posted",
-        detail: "Posted a neutral GitHub pull request review summary.",
-      });
-    } catch (error) {
-      setReviewNotice({
-        pullRequestId: selectedPullRequest.id,
-        variant: "error",
-        title: "Summary post failed",
-        detail: errorMessage(error, "Failed to post summary card."),
-      });
-    }
-  };
-
-  const postInlineCard = async (
-    postCard: ReviewPostCard,
-    input: {
-      readonly body: string;
-      readonly inReplyToGitHubCommentId?: string | null;
-    },
-  ) => {
-    if (primaryEnvironmentId === null || !selectedPullRequest) return;
-    try {
-      const next = unwrapCommandResult(
-        await postReviewInlineCard(
-          reviewTarget(primaryEnvironmentId, {
-            postCardId: postCard.id,
-            body: input.body,
-            inReplyToGitHubCommentId: input.inReplyToGitHubCommentId ?? null,
-          }),
-        ),
-      );
-      useReviewAppStore.getState().setSnapshot(next);
-      setReviewNotice({
-        pullRequestId: selectedPullRequest.id,
-        variant: "success",
-        title: "Inline comment posted",
-        detail: "Posted the approved inline card to GitHub.",
-      });
-    } catch (error) {
-      setReviewNotice({
-        pullRequestId: selectedPullRequest.id,
-        variant: "error",
-        title: "Inline post failed",
-        detail: errorMessage(error, "Failed to post inline card."),
-      });
-    }
-  };
-
   const runReview = async () => {
     if (!selectedPullRequest) return;
     if (primaryEnvironmentId === null) {
@@ -2756,7 +2690,9 @@ export default function ReviewWorkspace({
           }),
         ),
       );
-      const next = unwrapCommandResult(await refreshReviewInbox(reviewTarget(primaryEnvironmentId, {})));
+      const next = unwrapCommandResult(
+        await refreshReviewInbox(reviewTarget(primaryEnvironmentId, {})),
+      );
       useReviewAppStore.getState().setSnapshot({
         ...next,
         reviewRuns: [run, ...next.reviewRuns.filter((existing) => existing.id !== run.id)],
@@ -2796,7 +2732,9 @@ export default function ReviewWorkspace({
           reviewTarget(primaryEnvironmentId, { runId: latestRun.id, event: reviewEvent }),
         ),
       );
-      const next = unwrapCommandResult(await refreshReviewInbox(reviewTarget(primaryEnvironmentId, {})));
+      const next = unwrapCommandResult(
+        await refreshReviewInbox(reviewTarget(primaryEnvironmentId, {})),
+      );
       useReviewAppStore.getState().setSnapshot(next);
       setReviewNotice({
         pullRequestId: postedRun.pullRequestId,
@@ -2850,7 +2788,9 @@ export default function ReviewWorkspace({
     setMcpCommand("");
     useReviewAppStore
       .getState()
-      .setSnapshot(unwrapCommandResult(await refreshReviewInbox(reviewTarget(primaryEnvironmentId, {}))));
+      .setSnapshot(
+        unwrapCommandResult(await refreshReviewInbox(reviewTarget(primaryEnvironmentId, {}))),
+      );
   };
 
   const selectPullRequestForRoute = async (pullRequest: ReviewPullRequest) => {
@@ -2871,7 +2811,7 @@ export default function ReviewWorkspace({
     });
   };
 
-  const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+  const onResizePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     setResizeState({
       pointerId: event.pointerId,
@@ -2880,14 +2820,14 @@ export default function ReviewWorkspace({
     });
   };
 
-  const onResizePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+  const onResizePointerMove = (event: PointerEvent<HTMLButtonElement>) => {
     if (!resizeState || resizeState.pointerId !== event.pointerId) return;
     setListWidth(
       clampReviewPrListWidth(resizeState.startWidth + event.clientX - resizeState.startX),
     );
   };
 
-  const finishResize = (event: PointerEvent<HTMLDivElement>) => {
+  const finishResize = (event: PointerEvent<HTMLButtonElement>) => {
     if (!resizeState || resizeState.pointerId !== event.pointerId) return;
     const nextWidth = clampReviewPrListWidth(
       resizeState.startWidth + event.clientX - resizeState.startX,
@@ -3031,9 +2971,8 @@ export default function ReviewWorkspace({
           style={{ gridTemplateColumns: `${listWidth}px 4px minmax(0, 1fr)` }}
         >
           {list}
-          <div
-            role="separator"
-            aria-orientation="vertical"
+          <button
+            type="button"
             aria-label="Resize pull request list"
             className="cursor-col-resize bg-border/60 transition-colors hover:bg-border"
             onPointerDown={onResizePointerDown}

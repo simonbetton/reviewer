@@ -412,18 +412,6 @@ export const WsReviewRefreshInboxRpc = Rpc.make(REVIEW_WS_METHODS.refreshInbox, 
   error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
 });
 
-export const WsReviewRecordInteractionRpc = Rpc.make(REVIEW_WS_METHODS.recordInteraction, {
-  payload: ReviewRecordInteractionInput,
-  success: ReviewInboxSnapshot,
-  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
-});
-
-export const WsReviewSetRepositoryPinnedRpc = Rpc.make(REVIEW_WS_METHODS.setRepositoryPinned, {
-  payload: ReviewSetRepositoryPinnedInput,
-  success: ReviewInboxSnapshot,
-  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
-});
-
 export const WsReviewSetPullRequestPinnedRpc = Rpc.make(REVIEW_WS_METHODS.setPullRequestPinned, {
   payload: ReviewSetPullRequestPinnedInput,
   success: ReviewInboxSnapshot,
@@ -445,7 +433,7 @@ export const WsReviewSetPullRequestHiddenRpc = Rpc.make(REVIEW_WS_METHODS.setPul
 export const WsReviewTrackPullRequestRpc = Rpc.make(REVIEW_WS_METHODS.trackPullRequest, {
   payload: ReviewTrackPullRequestInput,
   success: ReviewInboxSnapshot,
-  error: ReviewWorkspaceRpcError,
+  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
 });
 
 export const WsReviewUpsertMcpConnectionRpc = Rpc.make(REVIEW_WS_METHODS.upsertMcpConnection, {
@@ -511,18 +499,6 @@ export const WsReviewUpdateCommentDraftRpc = Rpc.make(REVIEW_WS_METHODS.updateCo
 
 export const WsReviewSendChatMessageRpc = Rpc.make(REVIEW_WS_METHODS.sendChatMessage, {
   payload: ReviewSendChatMessageInput,
-  success: ReviewInboxSnapshot,
-  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
-});
-
-export const WsReviewPostSummaryCardRpc = Rpc.make(REVIEW_WS_METHODS.postSummaryCard, {
-  payload: ReviewPostSummaryCardInput,
-  success: ReviewInboxSnapshot,
-  error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
-});
-
-export const WsReviewPostInlineCardRpc = Rpc.make(REVIEW_WS_METHODS.postInlineCard, {
-  payload: ReviewPostInlineCardInput,
   success: ReviewInboxSnapshot,
   error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
 });

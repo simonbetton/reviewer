@@ -87,6 +87,7 @@ export interface TextGenerationService {
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
 }
 
+/**
  * TextGeneration - Service tag for commit and PR text generation.
  */
 export class TextGeneration extends Context.Service<

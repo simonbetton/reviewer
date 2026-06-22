@@ -93,6 +93,14 @@ function sanitizeBooleanRecord(value: unknown): Record<string, boolean> {
   );
 }
 
+function recordsEqual(left: Record<string, boolean>, right: Record<string, boolean>): boolean {
+  const leftEntries = Object.entries(left);
+  if (leftEntries.length !== Object.keys(right).length) {
+    return false;
+  }
+  return leftEntries.every(([key, value]) => right[key] === value);
+}
+
 function sanitizeTimestampRecord(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object") {
     return {};
@@ -140,10 +148,7 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
       parsed.threadChangedFilesExpandedById,
     ),
     reviewOwnerGroupExpandedById: Object.fromEntries(
-      sanitizeStringArray(parsed.collapsedReviewOwnerGroupIds).map((groupId) => [
-        groupId,
-        false,
-      ]),
+      sanitizeStringArray(parsed.collapsedReviewOwnerGroupIds).map((groupId) => [groupId, false]),
     ),
     reviewRepositoryExpandedById: Object.fromEntries(
       sanitizeStringArray(parsed.collapsedReviewRepositoryIds).map((repositoryId) => [
