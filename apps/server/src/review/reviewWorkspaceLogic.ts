@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   ReviewCategory,
   ReviewCodeBlock,
@@ -7,7 +8,6 @@ import type {
   ReviewConversationMessage,
   ReviewFinding,
   ReviewInboxSnapshot,
-  ReviewPostCard,
   ReviewPullRequest,
   ReviewRepository,
   ReviewRun,
@@ -118,7 +118,11 @@ export function sortReviewPullRequests(
 
 export function buildReviewSidebarGroups(
   repositories: ReadonlyArray<ReviewRepository>,
+  pullRequests: ReadonlyArray<ReviewPullRequest> = [],
 ): ReviewSidebarGroup[] {
+  const repositoryIdsWithPullRequests = new Set(
+    pullRequests.map((pullRequest) => pullRequest.repositoryId),
+  );
   const groupsById = new Map<
     string,
     {
@@ -128,7 +132,9 @@ export function buildReviewSidebarGroups(
       readonly repositories: ReviewRepository[];
     }
   >();
-  for (const repository of repositories.filter((repo) => repo.openPullRequestCount > 0)) {
+  for (const repository of repositories.filter(
+    (repo) => repo.openPullRequestCount > 0 || repositoryIdsWithPullRequests.has(repo.id),
+  )) {
     const id =
       repository.ownerKind === "personal"
         ? `personal:${repository.ownerLogin}`
@@ -620,7 +626,6 @@ export function createReviewRunConversationMessage(input: {
     role: "agent",
     body: `${input.summaryDraft.body}\n\nPrepared ${formatCount(inlineCount, "inline draft comment")}. Edit, dismiss, or retarget the cards before submitting the review.`,
     modelSelection: input.run.modelSelection,
-    proposedPostCardIds: [],
     createdAt: input.now,
   };
 }
@@ -635,9 +640,8 @@ export function createReviewChatResponse(input: {
 }): {
   readonly userMessage: ReviewConversationMessage;
   readonly agentMessage: ReviewConversationMessage;
-  readonly postCards: ReviewPostCard[];
 } {
-  const messageIdBase = `chat-${crypto.randomUUID()}`;
+  const messageIdBase = `chat-${randomUUID()}`;
   const activeDraft = input.commentDrafts.find((draft) => draft.status === "draft") ?? null;
   const responseLines = [
     `I reviewed that against PR #${input.pullRequest.number}.`,
@@ -650,51 +654,6 @@ export function createReviewChatResponse(input: {
   }
   responseLines.push(`User request: ${input.message}`);
 
-  const summaryCardId = `${messageIdBase}:summary-card`;
-  const inlineCardId = `${messageIdBase}:inline-card`;
-  const postCards: ReviewPostCard[] = [
-    {
-      id: summaryCardId,
-      pullRequestId: input.pullRequest.id,
-      messageId: `${messageIdBase}:agent`,
-      kind: "summary",
-      body: responseLines.join("\n\n"),
-      status: "draft",
-      filePath: null,
-      line: null,
-      side: null,
-      startLine: null,
-      startSide: null,
-      inReplyToGitHubCommentId: null,
-      postedGitHubReviewId: null,
-      postedGitHubCommentId: null,
-      failureDetail: null,
-      createdAt: input.now,
-      updatedAt: input.now,
-    },
-  ];
-  if (activeDraft) {
-    postCards.push({
-      id: inlineCardId,
-      pullRequestId: input.pullRequest.id,
-      messageId: `${messageIdBase}:agent`,
-      kind: "inline",
-      body: `Follow-up on this draft: ${activeDraft.body}`,
-      status: "draft",
-      filePath: activeDraft.filePath,
-      line: activeDraft.line,
-      side: activeDraft.side,
-      startLine: activeDraft.startLine,
-      startSide: activeDraft.startSide,
-      inReplyToGitHubCommentId: null,
-      postedGitHubReviewId: null,
-      postedGitHubCommentId: null,
-      failureDetail: null,
-      createdAt: input.now,
-      updatedAt: input.now,
-    });
-  }
-
   return {
     userMessage: {
       id: `${messageIdBase}:user`,
@@ -702,7 +661,6 @@ export function createReviewChatResponse(input: {
       role: "user",
       body: input.message,
       modelSelection: input.modelSelection,
-      proposedPostCardIds: [],
       createdAt: input.now,
     },
     agentMessage: {
@@ -711,10 +669,8 @@ export function createReviewChatResponse(input: {
       role: "agent",
       body: responseLines.join("\n\n"),
       modelSelection: input.modelSelection,
-      proposedPostCardIds: postCards.map((card) => card.id),
       createdAt: input.now,
     },
-    postCards,
   };
 }
 

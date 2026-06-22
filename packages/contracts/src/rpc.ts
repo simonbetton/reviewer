@@ -151,8 +151,6 @@ import {
   ReviewInstallSkillInput,
   ReviewInstallerResult,
   ReviewMcpConnection,
-  ReviewPostInlineCardInput,
-  ReviewPostSummaryCardInput,
   ReviewRefreshPullRequestDetailInput,
   ReviewRemoveMcpConnectionInput,
   ReviewRemoveSkillInput,
@@ -165,6 +163,7 @@ import {
   ReviewSkill,
   ReviewStartRunInput,
   ReviewSubmitRunInput,
+  ReviewTrackPullRequestInput,
   ReviewUpdateCommentDraftInput,
   ReviewUpdateSummaryDraftInput,
   ReviewUpsertMcpConnectionInput,
@@ -441,6 +440,12 @@ export const WsReviewSetPullRequestHiddenRpc = Rpc.make(REVIEW_WS_METHODS.setPul
   payload: ReviewSetPullRequestHiddenInput,
   success: ReviewInboxSnapshot,
   error: Schema.Union([ReviewWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+export const WsReviewTrackPullRequestRpc = Rpc.make(REVIEW_WS_METHODS.trackPullRequest, {
+  payload: ReviewTrackPullRequestInput,
+  success: ReviewInboxSnapshot,
+  error: ReviewWorkspaceRpcError,
 });
 
 export const WsReviewUpsertMcpConnectionRpc = Rpc.make(REVIEW_WS_METHODS.upsertMcpConnection, {
@@ -888,6 +893,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsReviewSetPullRequestPinnedRpc,
   WsReviewSetRepositoryHiddenRpc,
   WsReviewSetPullRequestHiddenRpc,
+  WsReviewTrackPullRequestRpc,
   WsReviewUpsertMcpConnectionRpc,
   WsReviewRemoveMcpConnectionRpc,
   WsReviewInstallSkillRpc,
@@ -898,8 +904,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsReviewDeleteSummaryDraftRpc,
   WsReviewUpdateCommentDraftRpc,
   WsReviewSendChatMessageRpc,
-  WsReviewPostSummaryCardRpc,
-  WsReviewPostInlineCardRpc,
   WsReviewStartRunRpc,
   WsReviewSubmitRunRpc,
   WsProjectsSearchEntriesRpc,

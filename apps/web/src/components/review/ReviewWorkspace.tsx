@@ -34,7 +34,6 @@ import type {
   ReviewCategory,
   ReviewCommentDraft,
   ReviewMcpConnection,
-  ReviewPostCard,
   ReviewPullRequest,
   ReviewPullRequestDetail,
   ReviewRepository,
@@ -64,6 +63,7 @@ import { type ComposerImageAttachment, useComposerDraftStore } from "../../compo
 import type { TerminalContextDraft } from "../../lib/terminalContext";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useIsMobile } from "../../hooks/useMediaQuery";
+import { useMountEffect } from "../../hooks/useMountEffect";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useSettings } from "../../hooks/useSettings";
 import { useTheme } from "../../hooks/useTheme";
@@ -86,7 +86,7 @@ import {
 import { useServerKeybindings, useServerProviders } from "../../rpc/serverState";
 import { useUiStateStore } from "../../uiStateStore";
 import { isElectron } from "../../env";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { ChatComposer, type ChatComposerHandle } from "../chat/ChatComposer";
 import { MessagesTimeline } from "../chat/MessagesTimeline";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -126,6 +126,13 @@ import {
   getActiveReviewCommentDrafts,
   getActiveReviewSummaryDraft,
 } from "./reviewDraftPresentation";
+import {
+  getVisibleInactiveReviewPullRequests,
+  getVisibleReviewPullRequests,
+  reviewPullRequestChecksStateLabel,
+  reviewPullRequestReviewDecisionLabel,
+  reviewPullRequestStateLabel,
+} from "./reviewSidebarLogic";
 
 const DEFAULT_RUN_CATEGORIES: ReviewCategory[] = ["risk", "security", "ux", "tests"];
 const REVIEW_PR_LIST_WIDTH_STORAGE_KEY = "t3code:review-pr-list-width:v1";
@@ -197,6 +204,10 @@ interface ResizeState {
 
 function repositoryHiddenSectionId(repositoryId: string): string {
   return `repo:${repositoryId}`;
+}
+
+function repositoryInactiveSectionId(repositoryId: string): string {
+  return `inactive:${repositoryId}`;
 }
 
 function clampReviewPrListWidth(value: number): number {
@@ -331,6 +342,107 @@ function HiddenMarker() {
       Hidden
     </Badge>
   );
+}
+
+type ReviewBadgeVariant = "secondary" | "warning" | "success" | "error";
+
+function reviewPullRequestLifecycleBadgeVariant(
+  pullRequest: ReviewPullRequest,
+): ReviewBadgeVariant {
+  if (pullRequest.state === "merged") return "success";
+  if (pullRequest.draft) return "warning";
+  return "secondary";
+}
+
+function reviewPullRequestDecisionBadgeVariant(pullRequest: ReviewPullRequest): ReviewBadgeVariant {
+  if (pullRequest.reviewDecision === "APPROVED") return "success";
+  if (pullRequest.reviewDecision === "CHANGES_REQUESTED") return "warning";
+  return "secondary";
+}
+
+function reviewPullRequestChecksBadgeVariant(pullRequest: ReviewPullRequest): ReviewBadgeVariant {
+  if (pullRequest.checksState === "SUCCESS") return "success";
+  if (pullRequest.checksState === "FAILURE" || pullRequest.checksState === "ERROR") return "error";
+  if (pullRequest.checksState === "PENDING" || pullRequest.checksState === "EXPECTED") {
+    return "warning";
+  }
+  return "secondary";
+}
+
+function ReviewPullRequestStatusBadges({
+  pullRequest,
+  reviewed = false,
+  hidden = false,
+  showComments = false,
+  className,
+}: {
+  readonly pullRequest: ReviewPullRequest;
+  readonly reviewed?: boolean;
+  readonly hidden?: boolean;
+  readonly showComments?: boolean;
+  readonly className?: string;
+}) {
+  const reviewDecisionLabel = reviewPullRequestReviewDecisionLabel(pullRequest);
+  const checksStateLabel = reviewPullRequestChecksStateLabel(pullRequest);
+
+  return (
+    <div className={cn("flex flex-wrap gap-2", className)}>
+      {hidden ? <HiddenMarker /> : null}
+      <Badge size="sm" variant={reviewPullRequestLifecycleBadgeVariant(pullRequest)}>
+        {reviewPullRequestStateLabel(pullRequest)}
+      </Badge>
+      {reviewDecisionLabel ? (
+        <Badge size="sm" variant={reviewPullRequestDecisionBadgeVariant(pullRequest)}>
+          {reviewDecisionLabel}
+        </Badge>
+      ) : null}
+      {checksStateLabel ? (
+        <Badge size="sm" variant={reviewPullRequestChecksBadgeVariant(pullRequest)}>
+          {checksStateLabel}
+        </Badge>
+      ) : null}
+      {showComments ? (
+        <Badge size="sm" variant="secondary">
+          {pullRequest.commentCount} comments
+        </Badge>
+      ) : null}
+      {reviewed ? (
+        <Badge size="sm" variant="success">
+          Agent reviewed
+        </Badge>
+      ) : null}
+    </div>
+  );
+}
+
+function ReviewRouteTracker({
+  environmentId,
+  target,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly target: ReviewPullRequestRouteTarget;
+}) {
+  const trackPullRequest = useAtomCommand(reviewEnvironment.trackPullRequest, {
+    reportFailure: false,
+  });
+
+  useMountEffect(() => {
+    let disposed = false;
+    void trackPullRequest(reviewTarget(environmentId, target))
+      .then((result) => unwrapCommandResult(result))
+      .then((next) => {
+        if (!disposed) {
+          useReviewAppStore.getState().setSnapshot(next);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+    };
+  });
+
+  return null;
 }
 
 function ReviewCodeMenu({
@@ -798,6 +910,12 @@ function ReviewWorkspaceHeader({
             </Badge>
           ) : null}
           {repository?.hidden || selectedPullRequest?.hidden ? <HiddenMarker /> : null}
+          {selectedPullRequest ? (
+            <ReviewPullRequestStatusBadges
+              pullRequest={selectedPullRequest}
+              className="hidden min-w-0 shrink lg:flex"
+            />
+          ) : null}
         </div>
         {repository ? (
           <div className={REVIEW_HEADER_ACTION_CLASS}>
@@ -1233,6 +1351,7 @@ function ReviewLanding() {
 function PullRequestList({
   repository,
   visiblePullRequests,
+  inactivePullRequests,
   hiddenPullRequests,
   selectedPullRequestId,
   reviewedPullRequestIds,
@@ -1241,6 +1360,7 @@ function PullRequestList({
 }: {
   readonly repository: ReviewRepository;
   readonly visiblePullRequests: ReadonlyArray<ReviewPullRequest>;
+  readonly inactivePullRequests: ReadonlyArray<ReviewPullRequest>;
   readonly hiddenPullRequests: ReadonlyArray<ReviewPullRequest>;
   readonly selectedPullRequestId: string | null;
   readonly reviewedPullRequestIds: ReadonlySet<string>;
@@ -1248,8 +1368,12 @@ function PullRequestList({
   readonly onTogglePullRequestHidden: (pullRequest: ReviewPullRequest, hidden: boolean) => void;
 }) {
   const hiddenSectionId = repositoryHiddenSectionId(repository.id);
+  const inactiveSectionId = repositoryInactiveSectionId(repository.id);
   const hiddenExpanded = useUiStateStore(
     (state) => state.reviewHiddenSectionExpandedById[hiddenSectionId] ?? false,
+  );
+  const inactiveExpanded = useUiStateStore(
+    (state) => state.reviewHiddenSectionExpandedById[inactiveSectionId] ?? false,
   );
   const toggleHiddenSection = useUiStateStore((state) => state.toggleReviewHiddenSection);
 
@@ -1268,10 +1392,37 @@ function PullRequestList({
         ))}
         {visiblePullRequests.length === 0 ? (
           <div className="px-5 py-8 text-sm text-muted-foreground">
-            No visible pull requests for {repository.nameWithOwner}.
+            No open pull requests for {repository.nameWithOwner}.
           </div>
         ) : null}
       </div>
+      {inactivePullRequests.length > 0 ? (
+        <div className="border-t border-border/70">
+          <button
+            type="button"
+            className="flex h-10 w-full cursor-pointer items-center gap-2 px-5 text-left text-muted-foreground text-sm transition-colors hover:bg-muted/40 hover:text-foreground"
+            onClick={() => toggleHiddenSection(inactiveSectionId)}
+          >
+            <GitPullRequestIcon className="size-4" />
+            <span className="min-w-0 flex-1">Tracked pull requests</span>
+            <span className="text-xs">{inactivePullRequests.length}</span>
+          </button>
+          {inactiveExpanded ? (
+            <div className="divide-y divide-border/70 border-t border-border/70">
+              {inactivePullRequests.map((pullRequest) => (
+                <PullRequestListItem
+                  key={pullRequest.id}
+                  pullRequest={pullRequest}
+                  selected={pullRequest.id === selectedPullRequestId}
+                  reviewed={reviewedPullRequestIds.has(pullRequest.id)}
+                  onSelect={onSelectPullRequest}
+                  onToggleHidden={onTogglePullRequestHidden}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {hiddenPullRequests.length > 0 ? (
         <div className="border-t border-border/70">
           <button
@@ -1342,20 +1493,13 @@ function PullRequestListItem({
               </span>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {hidden ? <HiddenMarker /> : null}
-            <Badge size="sm" variant={pullRequest.draft ? "warning" : "secondary"}>
-              {pullRequest.draft ? "Draft" : "Open"}
-            </Badge>
-            <Badge size="sm" variant="secondary">
-              {pullRequest.commentCount} comments
-            </Badge>
-            {reviewed ? (
-              <Badge size="sm" variant="success">
-                Agent reviewed
-              </Badge>
-            ) : null}
-          </div>
+          <ReviewPullRequestStatusBadges
+            pullRequest={pullRequest}
+            hidden={hidden}
+            reviewed={reviewed}
+            showComments
+            className="mt-3"
+          />
         </button>
         <div className="flex h-7 shrink-0 items-center gap-1">
           {pullRequest.pinned ? (
@@ -1556,6 +1700,7 @@ function ReviewChatComposer({
         onPreviousActivePendingUserInputQuestion={() => undefined}
         onChangeActivePendingUserInputCustomAnswer={() => undefined}
         onProviderModelSelect={handleProviderModelSelect}
+        getModelDisabledReason={() => null}
         toggleInteractionMode={() =>
           setInteractionMode((current) => (current === "plan" ? "default" : "plan"))
         }
@@ -1580,15 +1725,11 @@ function ReviewConversationThread({
   selectedModelSelection,
   conversationMessages,
   pendingChatMessage,
-  postCards,
-  githubReviewComments,
   sendingChat,
   timestampFormat,
   resolvedTheme,
   onModelSelectionChange,
   onSendChatMessage,
-  onPostSummaryCard,
-  onPostInlineCard,
 }: {
   readonly pullRequestId: string;
   readonly environmentId: EnvironmentId;
@@ -1598,26 +1739,14 @@ function ReviewConversationThread({
   readonly selectedModelSelection: ModelSelection;
   readonly conversationMessages: ReviewPullRequestDetail["conversationMessages"];
   readonly pendingChatMessage: ReviewPendingChatMessage | null;
-  readonly postCards: ReadonlyArray<ReviewPostCard>;
-  readonly githubReviewComments: ReviewPullRequestDetail["githubReviewComments"];
   readonly sendingChat: boolean;
   readonly timestampFormat: TimestampFormat;
   readonly resolvedTheme: "light" | "dark";
   readonly onModelSelectionChange: (selection: ModelSelection) => void;
   readonly onSendChatMessage: (message: string, modelSelection: ModelSelection) => Promise<boolean>;
-  readonly onPostSummaryCard: (postCard: ReviewPostCard, body: string) => void;
-  readonly onPostInlineCard: (
-    postCard: ReviewPostCard,
-    input: {
-      readonly body: string;
-      readonly inReplyToGitHubCommentId?: string | null;
-    },
-  ) => void;
 }) {
   const listRef = useRef<LegendListRef | null>(null);
   const shouldAutoScrollRef = useRef(true);
-  const [postCardEdits, setPostCardEdits] = useState<Record<string, string>>({});
-  const [postCardReplyTargets, setPostCardReplyTargets] = useState<Record<string, string>>({});
   const [isAtEnd, setIsAtEnd] = useState(true);
   shouldAutoScrollRef.current = isAtEnd;
   const timelineMessages = useMemo(
@@ -1633,7 +1762,6 @@ function ReviewConversationThread({
     [],
   );
   const emptyRevertTurnCountByUserMessageId = useMemo(() => new Map<MessageId, number>(), []);
-  const activePostCards = postCards.filter((card) => card.status !== "dismissed");
   const routeThreadKey = useMemo(
     () => scopedThreadKey(scopeThreadRef(environmentId, reviewConversationThreadId(pullRequestId))),
     [environmentId, pullRequestId],
@@ -1649,8 +1777,8 @@ function ReviewConversationThread({
                 <MessageSquareIcon className="mx-auto size-8 text-muted-foreground" />
                 <h3 className="mt-3 font-semibold">Start the review conversation</h3>
                 <p className="mt-1 text-muted-foreground text-sm">
-                  Run a review or ask the agent about this PR. Draft GitHub posts stay local until
-                  you approve them.
+                  Ask the agent about this PR. Draft feedback appears in the Review Summary and
+                  Inline Comment Drafts panels.
                 </p>
               </div>
             </div>
@@ -1658,12 +1786,10 @@ function ReviewConversationThread({
             <MessagesTimeline
               isWorking={sendingChat}
               activeTurnInProgress={sendingChat}
-              activeTurnId={null}
               activeTurnStartedAt={null}
               listRef={listRef}
               timelineEntries={timelineEntries}
-              completionDividerBeforeEntryId={null}
-              completionSummary={null}
+              latestTurn={null}
               turnDiffSummaryByAssistantMessageId={emptyTurnDiffSummaryByAssistantMessageId}
               routeThreadKey={routeThreadKey}
               onOpenTurnDiff={() => undefined}
@@ -1692,95 +1818,6 @@ function ReviewConversationThread({
             </div>
           ) : null}
         </div>
-
-        {activePostCards.length > 0 ? (
-          <div className="max-h-72 overflow-auto border-t border-border bg-muted/20 px-4 py-3">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <SendIcon className="size-4 text-muted-foreground" />
-              Proposed GitHub posts
-            </div>
-            <div className="space-y-3">
-              {activePostCards.map((card) => {
-                const cardBody = postCardEdits[card.id] ?? card.body;
-                const replyTarget =
-                  postCardReplyTargets[card.id] ?? card.inReplyToGitHubCommentId ?? "";
-                return (
-                  <div key={card.id} className="rounded-md border border-border bg-background p-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge size="sm" variant="secondary">
-                        {card.kind === "summary" ? "Summary post" : "Inline post"}
-                      </Badge>
-                      <Badge size="sm" variant={card.status === "posted" ? "success" : "secondary"}>
-                        {card.status}
-                      </Badge>
-                      {card.kind === "inline" && card.filePath && card.line ? (
-                        <span className="text-muted-foreground text-xs">
-                          {card.filePath}:{card.line}
-                        </span>
-                      ) : null}
-                    </div>
-                    <textarea
-                      aria-label="Post card body"
-                      value={cardBody}
-                      disabled={card.status === "posted"}
-                      rows={4}
-                      className="mt-3 min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      onChange={(event) =>
-                        setPostCardEdits((current) => ({
-                          ...current,
-                          [card.id]: event.currentTarget.value,
-                        }))
-                      }
-                    />
-                    {card.kind === "inline" ? (
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <select
-                          aria-label="Reply target"
-                          value={replyTarget}
-                          className="h-8 min-w-0 rounded-md border border-input bg-background px-2 text-xs"
-                          disabled={card.status === "posted"}
-                          onChange={(event) =>
-                            setPostCardReplyTargets((current) => ({
-                              ...current,
-                              [card.id]: event.currentTarget.value,
-                            }))
-                          }
-                        >
-                          <option value="">New inline comment</option>
-                          {githubReviewComments.map((comment) => (
-                            <option key={comment.id} value={comment.id}>
-                              Reply to {comment.authorLogin} on {comment.path}:{comment.line ?? "-"}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : null}
-                    <div className="mt-3 flex justify-end">
-                      <Button
-                        size="sm"
-                        className="gap-1.5"
-                        disabled={card.status === "posted"}
-                        onClick={() => {
-                          if (card.kind === "summary") {
-                            onPostSummaryCard(card, cardBody);
-                          } else {
-                            onPostInlineCard(card, {
-                              body: cardBody,
-                              inReplyToGitHubCommentId: replyTarget || null,
-                            });
-                          }
-                        }}
-                      >
-                        <SendIcon className="size-4" />
-                        Post to GitHub
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
 
         <ReviewChatComposer
           pullRequestId={pullRequestId}
@@ -1829,8 +1866,6 @@ function PullRequestDetail({
   onUpdateSummaryDraft,
   onDeleteSummaryDraft,
   onUpdateCommentDraft,
-  onPostSummaryCard,
-  onPostInlineCard,
 }: {
   readonly repository: ReviewRepository;
   readonly selectedPullRequest: ReviewPullRequest | null;
@@ -1875,14 +1910,6 @@ function PullRequestDetail({
     readonly startLine?: number | null;
     readonly startSide?: ReviewCommentDraft["startSide"];
   }) => void;
-  readonly onPostSummaryCard: (postCard: ReviewPostCard, body: string) => void;
-  readonly onPostInlineCard: (
-    postCard: ReviewPostCard,
-    input: {
-      readonly body: string;
-      readonly inReplyToGitHubCommentId?: string | null;
-    },
-  ) => void;
 }) {
   const [summaryEdits, setSummaryEdits] = useState<Record<string, string>>({});
   const [commentEdits, setCommentEdits] = useState<Record<string, string>>({});
@@ -1900,7 +1927,6 @@ function PullRequestDetail({
   const summaryDraft = getActiveReviewSummaryDraft(detail, latestRun);
   const commentDrafts = getActiveReviewCommentDrafts(detail, latestRun);
   const activeDrafts = commentDrafts.filter((draft) => draft.status !== "dismissed");
-  const visiblePostCards = detail?.postCards ?? [];
   const conversationMessages = detail?.conversationMessages ?? [];
   const findingsById = new Map((latestRun?.findings ?? []).map((finding) => [finding.id, finding]));
   const summaryDraftBody = summaryDraft ? (summaryEdits[summaryDraft.id] ?? summaryDraft.body) : "";
@@ -2072,6 +2098,10 @@ function PullRequestDetail({
                   <h2 className="mt-2 text-2xl font-semibold tracking-[-0.02em]">
                     {selectedPullRequest.title}
                   </h2>
+                  <ReviewPullRequestStatusBadges
+                    pullRequest={selectedPullRequest}
+                    className="mt-3"
+                  />
                   <div className="mt-2 flex flex-wrap gap-2 text-muted-foreground text-xs">
                     <span>{selectedPullRequest.headRefName}</span>
                     <span>{"->"}</span>
@@ -2137,15 +2167,11 @@ function PullRequestDetail({
                 selectedModelSelection={selectedModelSelection}
                 conversationMessages={conversationMessages}
                 pendingChatMessage={pendingChatMessage}
-                postCards={visiblePostCards}
-                githubReviewComments={detail?.githubReviewComments ?? []}
                 sendingChat={sendingChat}
                 timestampFormat={timestampFormat}
                 resolvedTheme={resolvedTheme}
                 onModelSelectionChange={onModelSelectionChange}
                 onSendChatMessage={onSendChatMessage}
-                onPostSummaryCard={onPostSummaryCard}
-                onPostInlineCard={onPostInlineCard}
               />
             </div>
 
@@ -2428,9 +2454,20 @@ export default function ReviewWorkspace({
   );
   const visiblePullRequests = useMemo(
     () =>
-      repository?.hidden
-        ? []
-        : allRepositoryPullRequests.filter((pullRequest) => !pullRequest.hidden),
+      getVisibleReviewPullRequests({
+        pullRequests: allRepositoryPullRequests,
+        repositoryExpanded: true,
+        repositoryHidden: repository?.hidden ?? false,
+      }),
+    [allRepositoryPullRequests, repository?.hidden],
+  );
+  const inactivePullRequests = useMemo(
+    () =>
+      getVisibleInactiveReviewPullRequests({
+        pullRequests: allRepositoryPullRequests,
+        repositoryExpanded: true,
+        repositoryHidden: repository?.hidden ?? false,
+      }),
     [allRepositoryPullRequests, repository?.hidden],
   );
   const hiddenPullRequests = useMemo(
@@ -2475,6 +2512,14 @@ export default function ReviewWorkspace({
       ),
     [snapshot?.reviewRuns],
   );
+  const routeTracker =
+    primaryEnvironmentId !== null && routePullRequestTarget ? (
+      <ReviewRouteTracker
+        key={`${primaryEnvironmentId}:${routePullRequestTarget.ownerLogin}/${routePullRequestTarget.repositoryName}#${routePullRequestTarget.number}`}
+        environmentId={primaryEnvironmentId}
+        target={routePullRequestTarget}
+      />
+    ) : null;
 
   const setReviewModelSelection = (selection: ModelSelection) => {
     setReviewModelSelectionOverride(selection);
@@ -2587,7 +2632,7 @@ export default function ReviewWorkspace({
     if (primaryEnvironmentId === null || !selectedPullRequest || trimmed.length === 0) return false;
     const pullRequestId = selectedPullRequest.id;
     const pendingMessage: ReviewPendingChatMessage = {
-      id: `pending-review-chat-${crypto.randomUUID()}`,
+      id: `pending-review-chat-${randomUUID()}`,
       pullRequestId,
       body: trimmed,
       createdAt: new Date().toISOString(),
@@ -2856,6 +2901,7 @@ export default function ReviewWorkspace({
   if (!snapshot || snapshot.groups.length === 0) {
     return (
       <SidebarInset className="h-dvh min-h-0 overflow-auto bg-background text-foreground">
+        {routeTracker}
         <ReviewWorkspaceHeader
           repository={null}
           selectedPullRequest={null}
@@ -2903,6 +2949,7 @@ export default function ReviewWorkspace({
   if (!repository) {
     return (
       <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+        {routeTracker}
         <div className="flex h-full min-h-0 flex-col">
           {header}
           <ReviewLanding />
@@ -2915,6 +2962,7 @@ export default function ReviewWorkspace({
     <PullRequestList
       repository={repository}
       visiblePullRequests={visiblePullRequests}
+      inactivePullRequests={inactivePullRequests}
       hiddenPullRequests={hiddenPullRequests}
       selectedPullRequestId={selectedPullRequest?.id ?? null}
       reviewedPullRequestIds={reviewedPullRequestIds}
@@ -2958,14 +3006,13 @@ export default function ReviewWorkspace({
       onUpdateSummaryDraft={(input) => void updateSummaryDraft(input)}
       onDeleteSummaryDraft={(input) => void deleteSummaryDraft(input)}
       onUpdateCommentDraft={(input) => void updateCommentDraft(input)}
-      onPostSummaryCard={(postCard, body) => void postSummaryCard(postCard, body)}
-      onPostInlineCard={(postCard, input) => void postInlineCard(postCard, input)}
     />
   );
 
   if (isMobile) {
     return (
       <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+        {routeTracker}
         <div className="flex h-full min-h-0 flex-col">
           {header}
           {selectedPullRequest ? detail : list}
@@ -2976,6 +3023,7 @@ export default function ReviewWorkspace({
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+      {routeTracker}
       <div className="flex h-full min-h-0 flex-col">
         {header}
         <div

@@ -88,7 +88,6 @@ function detail(): ReviewPullRequestDetail {
     ],
     commentDrafts: [commentDraft("comment-1"), commentDraft("comment-2")],
     conversationMessages: [],
-    postCards: [],
     syncedAt: now,
   };
 }

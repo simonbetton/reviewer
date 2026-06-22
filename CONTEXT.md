@@ -28,6 +28,10 @@ _Avoid_: Archived repository, dismissed PR
 A Pull Request shortcut shown at the top of the Review Inbox. A Pinned Pull Request remains in its Review Repository context and does not override Hidden Review Item visibility.
 _Avoid_: Pinned repo, favorite repository
 
+**Tracked Pull Request**:
+A Pull Request that T3 keeps addressable because the user selected, pinned, or locally reviewed it. A Tracked Pull Request may remain available after it leaves the normal open Review Inbox.
+_Avoid_: Retained PR, active PR
+
 **Review Provider**:
 An external account connection used by Peer Review to sync Review Repositories and submit approved findings as the connected user.
 _Avoid_: Source Control Provider, Git remote
@@ -49,15 +53,15 @@ A stable hunk of Pull Request diff used as context and as an anchor target for i
 _Avoid_: Snippet, code card
 
 **Review Comment Draft**:
-An editable inline comment proposed by T3 and anchored to a Review Code Block. A Review Comment Draft remains local until the user submits a GitHub Pull Request Review or explicitly posts an approved card.
+An editable inline comment proposed by T3 and anchored to a Review Code Block. A Review Comment Draft remains local until the user submits a GitHub Pull Request Review.
 _Avoid_: Finding, annotation
 
 **Review Summary**:
-An editable Pull Request review body drafted by T3. A Review Summary is submitted as a GitHub Pull Request Review summary, not as a regular PR issue comment.
+An editable Pull Request review body drafted by T3. A Review Summary is the local postable review summary surface and is submitted as a GitHub Pull Request Review summary, not as a regular PR issue comment.
 _Avoid_: PR comment, run summary
 
 **Review Conversation**:
-The PR-scoped chat transcript between the user and the review agent. A Review Conversation can include proposed post cards, but those cards remain local until the user edits, retargets, and approves them.
+The PR-scoped Q&A transcript between the user and the review agent. A Review Conversation can ask for Review Drafts to be created, but postable GitHub feedback lives in Review Summary and Review Comment Draft surfaces.
 _Avoid_: Session chat, global thread
 
 **Review Skill**:

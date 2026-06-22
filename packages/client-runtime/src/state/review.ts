@@ -53,6 +53,10 @@ export function createReviewEnvironmentAtoms<R, E>(
       label: "environment-data:review:set-pull-request-hidden",
       tag: REVIEW_WS_METHODS.setPullRequestHidden,
     }),
+    trackPullRequest: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:review:track-pull-request",
+      tag: REVIEW_WS_METHODS.trackPullRequest,
+    }),
     upsertMcpConnection: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:review:upsert-mcp-connection",
       tag: REVIEW_WS_METHODS.upsertMcpConnection,

@@ -120,8 +120,6 @@ import type {
   ReviewInstallSkillInput,
   ReviewInstallerResult,
   ReviewMcpConnection,
-  ReviewPostInlineCardInput,
-  ReviewPostSummaryCardInput,
   ReviewRefreshPullRequestDetailInput,
   ReviewRemoveMcpConnectionInput,
   ReviewRemoveSkillInput,
@@ -134,6 +132,7 @@ import type {
   ReviewSkill,
   ReviewStartRunInput,
   ReviewSubmitRunInput,
+  ReviewTrackPullRequestInput,
   ReviewUpdateCommentDraftInput,
   ReviewUpdateSummaryDraftInput,
   ReviewUpsertMcpConnectionInput,
@@ -1145,6 +1144,7 @@ export interface EnvironmentApi {
     setPullRequestPinned: (input: ReviewSetPullRequestPinnedInput) => Promise<ReviewInboxSnapshot>;
     setRepositoryHidden: (input: ReviewSetRepositoryHiddenInput) => Promise<ReviewInboxSnapshot>;
     setPullRequestHidden: (input: ReviewSetPullRequestHiddenInput) => Promise<ReviewInboxSnapshot>;
+    trackPullRequest: (input: ReviewTrackPullRequestInput) => Promise<ReviewInboxSnapshot>;
     upsertMcpConnection: (input: ReviewUpsertMcpConnectionInput) => Promise<ReviewMcpConnection>;
     removeMcpConnection: (input: ReviewRemoveMcpConnectionInput) => Promise<ReviewInboxSnapshot>;
     installSkill: (input: ReviewInstallSkillInput) => Promise<{
@@ -1161,8 +1161,6 @@ export interface EnvironmentApi {
     deleteSummaryDraft: (input: ReviewDeleteSummaryDraftInput) => Promise<ReviewInboxSnapshot>;
     updateCommentDraft: (input: ReviewUpdateCommentDraftInput) => Promise<ReviewInboxSnapshot>;
     sendChatMessage: (input: ReviewSendChatMessageInput) => Promise<ReviewInboxSnapshot>;
-    postSummaryCard: (input: ReviewPostSummaryCardInput) => Promise<ReviewInboxSnapshot>;
-    postInlineCard: (input: ReviewPostInlineCardInput) => Promise<ReviewInboxSnapshot>;
     startRun: (input: ReviewStartRunInput) => Promise<ReviewRun>;
     submitRun: (input: ReviewSubmitRunInput) => Promise<ReviewRun>;
     getDiffPreview: (input: ReviewDiffPreviewInput) => Promise<ReviewDiffPreviewResult>;

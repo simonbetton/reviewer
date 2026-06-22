@@ -52,9 +52,13 @@ import { resolveThreadRowClassName } from "../Sidebar.logic";
 import {
   getHiddenReviewPullRequests,
   getHiddenReviewRepositories,
+  getVisibleInactiveReviewPullRequests,
   getVisiblePinnedReviewPullRequestItems,
   getVisibleReviewPullRequests,
   getVisibleReviewRepositories,
+  reviewPullRequestChecksStateLabel,
+  reviewPullRequestReviewDecisionLabel,
+  reviewPullRequestStateLabel,
 } from "./reviewSidebarLogic";
 
 const EMPTY_REVIEW_GROUPS = [] as const;
@@ -76,6 +80,10 @@ function ownerHiddenSectionId(groupId: string): string {
 
 function repositoryHiddenSectionId(repositoryId: string): string {
   return `repo:${repositoryId}`;
+}
+
+function repositoryInactiveSectionId(repositoryId: string): string {
+  return `inactive:${repositoryId}`;
 }
 
 function pullRequestTimestamp(pullRequest: ReviewPullRequest): string | null {
@@ -184,6 +192,9 @@ function ReviewPullRequestRow({
 }) {
   const rowButtonRender = useMemo(() => <button type="button" />, []);
   const timestamp = pullRequestTimestamp(pullRequest);
+  const stateLabel = reviewPullRequestStateLabel(pullRequest);
+  const reviewDecisionLabel = reviewPullRequestReviewDecisionLabel(pullRequest);
+  const checksStateLabel = reviewPullRequestChecksStateLabel(pullRequest);
 
   return (
     <SidebarMenuSubItem className="group/review-row flex w-full items-center gap-1">
@@ -225,8 +236,26 @@ function ReviewPullRequestRow({
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {hidden ? <span className="text-[10px] text-muted-foreground/50">Hidden</span> : null}
-          {!hidden && pullRequest.draft ? (
-            <span className="text-[10px] text-warning-foreground/60">Draft</span>
+          {!hidden ? (
+            <span
+              className={
+                pullRequest.state === "open" && !pullRequest.draft
+                  ? "text-[10px] text-muted-foreground/45"
+                  : "text-[10px] text-warning-foreground/70"
+              }
+            >
+              {stateLabel}
+            </span>
+          ) : null}
+          {!hidden && reviewDecisionLabel ? (
+            <span className="max-w-20 truncate text-[10px] text-muted-foreground/55">
+              {reviewDecisionLabel}
+            </span>
+          ) : null}
+          {!hidden && checksStateLabel ? (
+            <span className="max-w-20 truncate text-[10px] text-muted-foreground/55">
+              {checksStateLabel}
+            </span>
           ) : null}
           {!hidden && reviewed ? (
             <Tooltip>
@@ -330,12 +359,14 @@ function ReviewHiddenSection({
   label,
   count,
   itemKind,
+  icon,
   children,
 }: {
   readonly id: string;
   readonly label: string;
   readonly count: number;
   readonly itemKind: "menu" | "sub";
+  readonly icon?: ReactNode;
   readonly children: ReactNode;
 }) {
   const expanded = useUiStateStore((state) => state.reviewHiddenSectionExpandedById[id] ?? false);
@@ -356,7 +387,7 @@ function ReviewHiddenSection({
         <ChevronRightIcon
           className={`size-3 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
         />
-        <EyeOffIcon className="size-3.5 shrink-0" />
+        {icon ?? <EyeOffIcon className="size-3.5 shrink-0" />}
         <span className="min-w-0 flex-1 truncate text-left">{label}</span>
         <span className="shrink-0 text-[10px]">{count}</span>
       </button>
@@ -398,6 +429,15 @@ function ReviewRepositoryRow({
   const visiblePullRequests = useMemo(
     () =>
       getVisibleReviewPullRequests({
+        pullRequests,
+        repositoryExpanded,
+        repositoryHidden: repository.hidden,
+      }),
+    [pullRequests, repository.hidden, repositoryExpanded],
+  );
+  const inactivePullRequests = useMemo(
+    () =>
+      getVisibleInactiveReviewPullRequests({
         pullRequests,
         repositoryExpanded,
         repositoryHidden: repository.hidden,
@@ -455,6 +495,27 @@ function ReviewRepositoryRow({
               onToggleHidden={onTogglePullRequestHidden}
             />
           ))}
+          <ReviewHiddenSection
+            id={repositoryInactiveSectionId(repository.id)}
+            label="Tracked pull requests"
+            count={inactivePullRequests.length}
+            itemKind="sub"
+            icon={<GitPullRequestIcon className="size-3.5 shrink-0" />}
+          >
+            <SidebarMenuSub className="mx-0 border-l-0 px-0 py-0">
+              {inactivePullRequests.map((pullRequest) => (
+                <ReviewPullRequestRow
+                  key={pullRequest.id}
+                  pullRequest={pullRequest}
+                  repository={repository}
+                  isActive={pullRequest.id === activePullRequestId}
+                  reviewed={reviewedPullRequestIds.has(pullRequest.id)}
+                  onSelect={onSelectPullRequest}
+                  onToggleHidden={onTogglePullRequestHidden}
+                />
+              ))}
+            </SidebarMenuSub>
+          </ReviewHiddenSection>
           <ReviewHiddenSection
             id={repositoryHiddenSectionId(repository.id)}
             label="Hidden pull requests"
@@ -708,6 +769,16 @@ export function PeerReviewSidebarSection() {
               .length > 0,
         )
         .map((repository) => repositoryHiddenSectionId(repository.id)),
+      ...repositories
+        .filter(
+          (repository) =>
+            getVisibleInactiveReviewPullRequests({
+              pullRequests: pullRequestsByRepositoryId.get(repository.id) ?? [],
+              repositoryExpanded: true,
+              repositoryHidden: repository.hidden,
+            }).length > 0,
+        )
+        .map((repository) => repositoryInactiveSectionId(repository.id)),
     ];
 
     collapseReviewItems({

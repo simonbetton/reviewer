@@ -52,6 +52,7 @@ const pr = (overrides: Partial<ReviewPullRequest>): ReviewPullRequest => ({
   lastProviderUpdatedAt: null,
   pinned: false,
   hidden: false,
+  tracked: false,
   ...overrides,
 });
 

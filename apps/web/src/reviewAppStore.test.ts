@@ -63,6 +63,7 @@ function snapshot(input: {
       lastProviderUpdatedAt: null,
       pinned: false,
       hidden: false,
+      tracked: false,
     })),
     pullRequestDetails: [],
     skills: [],

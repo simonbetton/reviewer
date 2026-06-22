@@ -114,8 +114,6 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
-import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
-import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -331,11 +329,21 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [REVIEW_WS_METHODS.recordInteraction, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.setRepositoryPinned, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.setPullRequestPinned, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.setRepositoryHidden, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.setPullRequestHidden, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.trackPullRequest, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.upsertMcpConnection, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.removeMcpConnection, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.installSkill, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.setSkillEnabled, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.removeSkill, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.refreshPullRequestDetail, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.updateSummaryDraft, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.deleteSummaryDraft, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.updateCommentDraft, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.sendChatMessage, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.postSummaryCard, AuthReviewWriteScope],
+  [REVIEW_WS_METHODS.postInlineCard, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.startRun, AuthReviewWriteScope],
   [REVIEW_WS_METHODS.submitRun, AuthReviewWriteScope],
   [WS_METHODS.terminalOpen, AuthTerminalOperateScope],
@@ -1391,6 +1399,14 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
           observeRpcEffect(
             REVIEW_WS_METHODS.setPullRequestHidden,
             reviewWorkspace.setPullRequestHidden(input),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
+        [REVIEW_WS_METHODS.trackPullRequest]: (input) =>
+          observeRpcEffect(
+            REVIEW_WS_METHODS.trackPullRequest,
+            reviewWorkspace.trackPullRequest(input),
             {
               "rpc.aggregate": "review",
             },

@@ -4,9 +4,13 @@ import type { ReviewPullRequest, ReviewRepository } from "@t3tools/contracts";
 import {
   getHiddenReviewPullRequests,
   getHiddenReviewRepositories,
+  getVisibleInactiveReviewPullRequests,
   getVisiblePinnedReviewPullRequestItems,
   getVisibleReviewPullRequests,
   getVisibleReviewRepositories,
+  reviewPullRequestChecksStateLabel,
+  reviewPullRequestReviewDecisionLabel,
+  reviewPullRequestStateLabel,
 } from "./reviewSidebarLogic";
 
 function pullRequest(id: string): ReviewPullRequest {
@@ -32,6 +36,7 @@ function pullRequest(id: string): ReviewPullRequest {
     lastProviderUpdatedAt: null,
     pinned: false,
     hidden: false,
+    tracked: false,
   };
 }
 
@@ -85,6 +90,24 @@ describe("getVisibleReviewPullRequests", () => {
       }),
     ).toEqual([visible]);
     expect(getHiddenReviewPullRequests([visible, hidden])).toEqual([hidden]);
+  });
+
+  it("keeps inactive tracked pull requests out of the normal visible list", () => {
+    const open = pullRequest("pr-open");
+    const merged = { ...pullRequest("pr-merged"), state: "merged" as const, tracked: true };
+
+    expect(
+      getVisibleReviewPullRequests({
+        pullRequests: [open, merged],
+        repositoryExpanded: true,
+      }),
+    ).toEqual([open]);
+    expect(
+      getVisibleInactiveReviewPullRequests({
+        pullRequests: [open, merged],
+        repositoryExpanded: true,
+      }),
+    ).toEqual([merged]);
   });
 
   it("hides children for hidden repositories even when expanded", () => {
@@ -151,5 +174,26 @@ describe("getVisiblePinnedReviewPullRequestItems", () => {
         ]),
       }).map((item) => item.pullRequest.id),
     ).toEqual(["pr-newer", "pr-older"]);
+  });
+});
+
+describe("review pull request status labels", () => {
+  it("formats lifecycle, review decision, and check labels", () => {
+    expect(reviewPullRequestStateLabel({ ...pullRequest("pr-draft"), draft: true })).toBe("Draft");
+    expect(reviewPullRequestStateLabel({ ...pullRequest("pr-merged"), state: "merged" })).toBe(
+      "Merged",
+    );
+    expect(
+      reviewPullRequestReviewDecisionLabel({
+        ...pullRequest("pr-review"),
+        reviewDecision: "CHANGES_REQUESTED",
+      }),
+    ).toBe("Changes requested");
+    expect(
+      reviewPullRequestChecksStateLabel({
+        ...pullRequest("pr-checks"),
+        checksState: "SUCCESS",
+      }),
+    ).toBe("Checks passed");
   });
 });

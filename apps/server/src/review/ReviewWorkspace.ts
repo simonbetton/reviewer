@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
@@ -24,7 +25,6 @@ import {
   type ReviewConversationMessage,
   type ReviewFinding,
   ReviewMcpConnection,
-  ReviewPostCard,
   ReviewPullRequestDetail,
   ReviewPullRequest,
   ReviewRepository,
@@ -38,8 +38,6 @@ import {
   type ReviewGitHubBeginOAuthResult,
   type ReviewGitHubCompleteOAuthInput,
   type ReviewInstallSkillInput,
-  type ReviewPostInlineCardInput,
-  type ReviewPostSummaryCardInput,
   type ReviewRefreshPullRequestDetailInput,
   type ReviewRemoveMcpConnectionInput,
   type ReviewRemoveSkillInput,
@@ -50,6 +48,7 @@ import {
   type ReviewSetSkillEnabledInput,
   type ReviewStartRunInput,
   type ReviewSubmitRunInput,
+  type ReviewTrackPullRequestInput,
   type ReviewUpdateCommentDraftInput,
   type ReviewUpdateSummaryDraftInput,
   type ReviewUpsertMcpConnectionInput,
@@ -81,6 +80,9 @@ const DEFAULT_GITHUB_OAUTH_SCOPES = ["read:user", "user:email", "repo", "read:or
 const GITHUB_OAUTH_TOKEN_SECRET_NAME = "review-github-oauth-token";
 const REVIEW_WORKSPACE_STATE_FILE = "review-workspace.json";
 const REVIEW_INBOX_SYNC_INTERVAL = Duration.seconds(60);
+const REVIEW_INBOX_REPOSITORY_LIMIT = 50;
+const REVIEW_INBOX_PULL_REQUEST_LIMIT = 20;
+const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const MAX_REVIEW_GENERATION_PROMPT_CHARS = 100_000;
 const MAX_REVIEW_GENERATED_COMMENTS = 25;
 const isReviewWorkspaceError = Schema.is(ReviewWorkspaceError);
@@ -108,20 +110,8 @@ export const ReviewAgentRunOutput = Schema.Struct({
 });
 type ReviewAgentRunOutput = typeof ReviewAgentRunOutput.Type;
 
-export const ReviewAgentChatPostCardOutput = Schema.Struct({
-  kind: Schema.Literals(["summary", "inline"]),
-  body: Schema.String,
-  path: Schema.NullOr(Schema.String),
-  line: Schema.NullOr(Schema.Int),
-  side: NullableReviewCommentSide,
-  startLine: Schema.NullOr(Schema.Int),
-  startSide: NullableReviewCommentSide,
-  inReplyToGitHubCommentId: Schema.NullOr(Schema.String),
-});
-
 export const ReviewAgentChatOutput = Schema.Struct({
   body: Schema.String,
-  postCards: Schema.Array(ReviewAgentChatPostCardOutput),
 });
 type ReviewAgentChatOutput = typeof ReviewAgentChatOutput.Type;
 
@@ -138,6 +128,10 @@ const PersistedReviewWorkspaceState = Schema.Struct({
   syncedAt: Schema.NullOr(Schema.String),
 });
 type PersistedReviewWorkspaceState = typeof PersistedReviewWorkspaceState.Type;
+interface GitHubPullRequestHealth {
+  readonly repository: ReviewRepository;
+  readonly pullRequest: ReviewPullRequest;
+}
 
 const PersistedReviewWorkspaceStateJson = fromJsonStringPretty(PersistedReviewWorkspaceState);
 const encodePersistedReviewWorkspaceStateJson = Schema.encodeEffect(
@@ -167,6 +161,9 @@ export interface ReviewWorkspaceShape {
   ) => Effect.Effect<ReviewInboxSnapshot, ReviewWorkspaceError>;
   readonly setPullRequestHidden: (
     input: ReviewSetPullRequestHiddenInput,
+  ) => Effect.Effect<ReviewInboxSnapshot, ReviewWorkspaceError>;
+  readonly trackPullRequest: (
+    input: ReviewTrackPullRequestInput,
   ) => Effect.Effect<ReviewInboxSnapshot, ReviewWorkspaceError>;
   readonly upsertMcpConnection: (
     input: ReviewUpsertMcpConnectionInput,
@@ -202,12 +199,6 @@ export interface ReviewWorkspaceShape {
   ) => Effect.Effect<ReviewInboxSnapshot, ReviewWorkspaceError>;
   readonly sendChatMessage: (
     input: ReviewSendChatMessageInput,
-  ) => Effect.Effect<ReviewInboxSnapshot, ReviewWorkspaceError>;
-  readonly postSummaryCard: (
-    input: ReviewPostSummaryCardInput,
-  ) => Effect.Effect<ReviewInboxSnapshot, ReviewWorkspaceError>;
-  readonly postInlineCard: (
-    input: ReviewPostInlineCardInput,
   ) => Effect.Effect<ReviewInboxSnapshot, ReviewWorkspaceError>;
   readonly startRun: (input: ReviewStartRunInput) => Effect.Effect<ReviewRun, ReviewWorkspaceError>;
   readonly submitRun: (
@@ -252,7 +243,7 @@ function toWorkspaceError(operation: string, detail: string, cause?: unknown) {
 function snapshotFromState(state: PersistedReviewWorkspaceState): ReviewInboxSnapshot {
   return {
     github: state.github,
-    groups: buildReviewSidebarGroups(state.repositories),
+    groups: buildReviewSidebarGroups(state.repositories, state.pullRequests),
     pullRequests: sortReviewPullRequests(state.pullRequests),
     pullRequestDetails: state.pullRequestDetails,
     skills: [...DEFAULT_REVIEW_SKILLS, ...state.skills],
@@ -385,6 +376,254 @@ function extractPullRequestHeadSha(raw: Record<string, unknown>): string | null 
   const sha = head?.sha;
   return typeof sha === "string" && sha.trim().length > 0 ? sha : null;
 }
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function graphQlNodes(value: unknown): Record<string, unknown>[] {
+  const record = asRecord(value);
+  const nodes = Array.isArray(record?.nodes) ? record.nodes : [];
+  return nodes.flatMap((node) => {
+    const normalized = asRecord(node);
+    return normalized ? [normalized] : [];
+  });
+}
+
+function graphQlTotalCount(value: unknown): number {
+  return parseNonNegativeInt(asRecord(value)?.totalCount);
+}
+
+function parseTrimmedString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+}
+
+function normalizeGitHubGraphQlPullRequestState(
+  raw: Record<string, unknown>,
+): ReviewPullRequest["state"] {
+  const state = typeof raw.state === "string" ? raw.state.toUpperCase() : "";
+  if (state === "MERGED" || raw.merged === true) return "merged";
+  if (state === "CLOSED") return "closed";
+  return "open";
+}
+
+function extractGitHubGraphQlHeadSha(raw: Record<string, unknown>): string | null {
+  const headRefOid = raw.headRefOid;
+  if (typeof headRefOid === "string" && headRefOid.trim().length > 0) return headRefOid;
+  const commit = asRecord(graphQlNodes(raw.commits).at(-1)?.commit);
+  const oid = commit?.oid;
+  return typeof oid === "string" && oid.trim().length > 0 ? oid : null;
+}
+
+function extractGitHubGraphQlChecksState(raw: Record<string, unknown>): string | null {
+  const pullRequestRollup = asRecord(raw.statusCheckRollup);
+  const pullRequestState = pullRequestRollup?.state;
+  if (typeof pullRequestState === "string" && pullRequestState.trim().length > 0) {
+    return pullRequestState;
+  }
+  const commit = asRecord(graphQlNodes(raw.commits).at(-1)?.commit);
+  const commitRollup = asRecord(commit?.statusCheckRollup);
+  const commitState = commitRollup?.state;
+  return typeof commitState === "string" && commitState.trim().length > 0 ? commitState : null;
+}
+
+function gitHubRepositoryId(nameWithOwner: string): string {
+  return `github:${nameWithOwner.toLowerCase()}`;
+}
+
+function normalizeGitHubGraphQlRepository(input: {
+  readonly raw: Record<string, unknown>;
+  readonly existing?: ReviewRepository;
+}): ReviewRepository | null {
+  const nameWithOwner = parseTrimmedString(input.raw.nameWithOwner, "");
+  if (!nameWithOwner.includes("/")) return null;
+  const [ownerLoginFallback = "", nameFallback = ""] = nameWithOwner.split("/");
+  const owner = asRecord(input.raw.owner);
+  const ownerLogin = parseTrimmedString(owner?.login, ownerLoginFallback);
+  const name = parseTrimmedString(input.raw.name, nameFallback);
+  if (!ownerLogin || !name) return null;
+  return {
+    id: gitHubRepositoryId(nameWithOwner),
+    provider: "github",
+    ownerKind: owner?.__typename === "Organization" ? "organization" : "personal",
+    ownerLogin,
+    name,
+    nameWithOwner,
+    url: parseTrimmedString(input.raw.url, `https://github.com/${nameWithOwner}`),
+    openPullRequestCount: graphQlTotalCount(input.raw.openPullRequestCount),
+    lastProviderUpdatedAt: parseIsoDateTime(input.raw.pushedAt),
+    hidden: input.existing?.hidden ?? false,
+  };
+}
+
+function normalizeGitHubGraphQlPullRequest(input: {
+  readonly raw: Record<string, unknown>;
+  readonly repository: ReviewRepository;
+  readonly existing?: ReviewPullRequest;
+  readonly tracked?: boolean;
+}): ReviewPullRequest | null {
+  const number = parsePositiveInt(input.raw.number);
+  if (!number) return null;
+  const id = `${input.repository.id}#${number}`;
+  return {
+    id,
+    repositoryId: input.repository.id,
+    provider: "github",
+    number,
+    title: parseTrimmedString(input.raw.title, `PR #${number}`),
+    url: parseTrimmedString(
+      input.raw.url,
+      `https://github.com/${input.repository.nameWithOwner}/pull/${number}`,
+    ),
+    authorLogin: parseTrimmedString(asRecord(input.raw.author)?.login, "unknown"),
+    baseRefName: parseTrimmedString(input.raw.baseRefName, "base"),
+    headRefName: parseTrimmedString(input.raw.headRefName, "head"),
+    state: normalizeGitHubGraphQlPullRequestState(input.raw),
+    draft: Boolean(input.raw.isDraft),
+    additions: parseNonNegativeInt(input.raw.additions),
+    deletions: parseNonNegativeInt(input.raw.deletions),
+    changedFiles: parseNonNegativeInt(input.raw.changedFiles),
+    commentCount:
+      graphQlTotalCount(input.raw.comments) + graphQlTotalCount(input.raw.reviewThreads),
+    reviewDecision:
+      typeof input.raw.reviewDecision === "string" && input.raw.reviewDecision.trim().length > 0
+        ? input.raw.reviewDecision
+        : null,
+    checksState: extractGitHubGraphQlChecksState(input.raw),
+    headSha: extractGitHubGraphQlHeadSha(input.raw),
+    lastProviderUpdatedAt: parseIsoDateTime(input.raw.updatedAt),
+    pinned: input.existing?.pinned ?? false,
+    hidden: input.existing?.hidden ?? false,
+    tracked: input.tracked ?? input.existing?.tracked ?? false,
+  };
+}
+
+function hasLocalReviewArtifact(
+  state: PersistedReviewWorkspaceState,
+  pullRequestId: string,
+): boolean {
+  if (state.reviewRuns.some((run) => run.pullRequestId === pullRequestId)) return true;
+  return state.pullRequestDetails.some(
+    (detail) =>
+      detail.pullRequestId === pullRequestId &&
+      (detail.summaryDrafts.length > 0 ||
+        detail.commentDrafts.length > 0 ||
+        detail.conversationMessages.length > 0),
+  );
+}
+
+function shouldRetainPullRequest(
+  state: PersistedReviewWorkspaceState,
+  pullRequest: ReviewPullRequest,
+): boolean {
+  return (
+    pullRequest.state === "open" ||
+    pullRequest.tracked ||
+    pullRequest.pinned ||
+    hasLocalReviewArtifact(state, pullRequest.id)
+  );
+}
+
+const REVIEW_PULL_REQUEST_HEALTH_GRAPHQL_FRAGMENT = `
+fragment ReviewPullRequestHealth on PullRequest {
+  number
+  title
+  url
+  author {
+    login
+  }
+  baseRefName
+  headRefName
+  state
+  merged
+  isDraft
+  additions
+  deletions
+  changedFiles
+  comments {
+    totalCount
+  }
+  reviewThreads {
+    totalCount
+  }
+  reviewDecision
+  updatedAt
+  headRefOid
+  statusCheckRollup {
+    state
+  }
+  commits(last: 1) {
+    nodes {
+      commit {
+        oid
+        statusCheckRollup {
+          state
+        }
+      }
+    }
+  }
+}
+`;
+
+const REVIEW_INBOX_GRAPHQL_QUERY = `
+${REVIEW_PULL_REQUEST_HEALTH_GRAPHQL_FRAGMENT}
+query T3ReviewInbox($repositoryFirst: Int!, $pullRequestFirst: Int!) {
+  viewer {
+    repositories(
+      first: $repositoryFirst
+      affiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]
+      orderBy: { field: PUSHED_AT, direction: DESC }
+    ) {
+      nodes {
+        name
+        nameWithOwner
+        url
+        pushedAt
+        owner {
+          __typename
+          login
+        }
+        openPullRequestCount: pullRequests(states: OPEN) {
+          totalCount
+        }
+        openPullRequests: pullRequests(
+          first: $pullRequestFirst
+          states: OPEN
+          orderBy: { field: UPDATED_AT, direction: DESC }
+        ) {
+          nodes {
+            ...ReviewPullRequestHealth
+          }
+        }
+      }
+    }
+  }
+}
+`;
+
+const REVIEW_TRACK_PULL_REQUEST_GRAPHQL_QUERY = `
+${REVIEW_PULL_REQUEST_HEALTH_GRAPHQL_FRAGMENT}
+query T3ReviewTrackPullRequest($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    name
+    nameWithOwner
+    url
+    pushedAt
+    owner {
+      __typename
+      login
+    }
+    openPullRequestCount: pullRequests(states: OPEN) {
+      totalCount
+    }
+    pullRequest(number: $number) {
+      ...ReviewPullRequestHealth
+    }
+  }
+}
+`;
 
 function replacePullRequestDetail(
   details: ReadonlyArray<ReviewPullRequestDetail>,
@@ -700,9 +939,8 @@ function formatReviewChatPrompt(input: {
   return truncatePromptSection(
     [
       "You are the PR review agent inside T3 Code. Reply directly to the user's latest message.",
-      "Return JSON only. Include postCards only when you are proposing text the user may post back to GitHub.",
-      "Summary post cards create a neutral pull request review body. Inline post cards either reply to an existing GitHub review comment via inReplyToGitHubCommentId or create a new inline comment using a supplied diff anchor.",
-      "Every post card object must include every key shown in Output shape. Set unused target values to null; do not omit keys.",
+      "Return JSON only. This is an in-app Q&A response, not postable GitHub feedback.",
+      "Do not draft GitHub review summaries, inline comments, replies, or post text in this response.",
       `Pull request: #${input.pullRequest.number} ${input.pullRequest.title}`,
       `Head SHA: ${input.pullRequest.headSha ?? input.detail.headSha ?? "unknown"}`,
       "",
@@ -724,26 +962,98 @@ function formatReviewChatPrompt(input: {
       "Output shape:",
       JSON.stringify({
         body: "direct in-app reply to the user",
-        postCards: [
+      }),
+    ].join("\n"),
+    MAX_REVIEW_GENERATION_PROMPT_CHARS,
+  );
+}
+
+function formatReviewDraftPrompt(input: {
+  readonly pullRequest: ReviewPullRequest;
+  readonly detail: ReviewPullRequestDetail;
+  readonly message: string;
+}): string {
+  const conversation = input.detail.conversationMessages
+    .slice(-20)
+    .map((entry) => `${entry.role}: ${entry.body}`)
+    .join("\n\n");
+  const drafts = [
+    ...input.detail.summaryDrafts.map((draft) => `summary draft (${draft.status}): ${draft.body}`),
+    ...input.detail.commentDrafts.map(
+      (draft) =>
+        `inline draft (${draft.status}) ${draft.filePath}:${draft.side}:${draft.line}: ${draft.body}`,
+    ),
+  ];
+  const githubContext = [
+    ...input.detail.githubReviews.map(
+      (review) => `review by ${review.authorLogin} (${review.state}): ${review.body}`,
+    ),
+    ...input.detail.githubReviewComments.map(
+      (comment) =>
+        `inline by ${comment.authorLogin} id=${comment.id} ${comment.path}:${
+          comment.side ?? "RIGHT"
+        }:${comment.line ?? "?"}: ${comment.body}`,
+    ),
+  ];
+  const anchors = input.detail.codeBlocks.flatMap((block) =>
+    block.lines.flatMap((line) => {
+      if (line.kind === "addition" && line.newLine !== null) {
+        return [`${block.filePath}:RIGHT:${line.newLine}: ${line.content}`];
+      }
+      if (line.kind === "deletion" && line.oldLine !== null) {
+        return [`${block.filePath}:LEFT:${line.oldLine}: ${line.content}`];
+      }
+      if (line.kind === "context" && line.newLine !== null) {
+        return [`${block.filePath}:RIGHT:${line.newLine}: ${line.content}`];
+      }
+      return [];
+    }),
+  );
+
+  return truncatePromptSection(
+    [
+      "You are drafting local Review Drafts for T3 Code from a PR chat request.",
+      "Return JSON only. Do not include markdown fences around the JSON.",
+      "Create a neutral pull request review summary and, only when useful, actionable inline comments.",
+      "The generated summary and inline comments stay local until the user submits the Review Drafts.",
+      "Use only line anchors from the supplied diff anchors. For added/new/context lines use side RIGHT and the new line number. For removed lines use side LEFT and the old line number.",
+      "Every comment object must include every key shown in Output shape. Set unused values to null; do not omit keys.",
+      "Do not invent files or line numbers. If the user only asked for a summary, return an empty comments array.",
+      `Pull request: #${input.pullRequest.number} ${input.pullRequest.title}`,
+      `Head SHA: ${input.pullRequest.headSha ?? input.detail.headSha ?? "unknown"}`,
+      "",
+      "Conversation so far:",
+      conversation || "No earlier local conversation.",
+      "",
+      "Local T3 drafts:",
+      drafts.length > 0 ? drafts.join("\n\n") : "No local drafts.",
+      "",
+      "GitHub reviews and inline comments:",
+      githubContext.length > 0 ? githubContext.join("\n\n") : "No GitHub review context.",
+      "",
+      "Diff anchors:",
+      anchors.length > 0 ? anchors.join("\n") : "No diff anchors available.",
+      "",
+      "Latest user message:",
+      input.message,
+      "",
+      "Output shape:",
+      JSON.stringify({
+        summary: "neutral pull request review summary draft",
+        comments: [
           {
-            kind: "inline",
-            body: "proposed inline comment body",
             path: "path/from/diff",
             line: 123,
             side: "RIGHT",
             startLine: null,
             startSide: null,
-            inReplyToGitHubCommentId: null,
-          },
-          {
-            kind: "summary",
-            body: "proposed pull request review summary",
-            path: null,
-            line: null,
-            side: null,
-            startLine: null,
-            startSide: null,
-            inReplyToGitHubCommentId: null,
+            category: "correctness",
+            severity: "major",
+            confidence: 80,
+            title: "short issue title",
+            explanation: "why this matters",
+            body: "inline review comment draft",
+            suggestedFix: null,
           },
         ],
       }),
@@ -752,83 +1062,33 @@ function formatReviewChatPrompt(input: {
   );
 }
 
+function isExplicitReviewDraftRequest(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    /\b(draft|compose|write|prepare|suggest)\b[\s\S]{0,100}\b(comment|reply|review|summary|feedback|github post)\b/u.test(
+      normalized,
+    ) ||
+    /\b(comment|reply|review|summary|feedback|github post)\b[\s\S]{0,100}\b(draft|compose|write|prepare|suggest)\b/u.test(
+      normalized,
+    ) ||
+    /\b(create|make|leave)\b[\s\S]{0,80}\b(review comment|inline comment|github comment|review summary)\b/u.test(
+      normalized,
+    )
+  );
+}
+
 function createGeneratedChatResponse(input: {
   readonly output: ReviewAgentChatOutput;
   readonly pullRequest: ReviewPullRequest;
-  readonly detail: ReviewPullRequestDetail;
   readonly message: string;
   readonly modelSelection: ModelSelection;
   readonly now: string;
 }): {
   readonly userMessage: ReviewConversationMessage;
   readonly agentMessage: ReviewConversationMessage;
-  readonly postCards: ReviewPostCard[];
 } {
-  const userMessageId = `message-${crypto.randomUUID()}`;
-  const agentMessageId = `message-${crypto.randomUUID()}`;
-  const postCards: ReviewPostCard[] = [];
-  input.output.postCards.slice(0, MAX_REVIEW_GENERATED_COMMENTS).forEach((postCard, index) => {
-    const body = postCard.body.trim();
-    if (body.length === 0) return;
-    if (postCard.kind === "summary") {
-      postCards.push({
-        id: `${agentMessageId}:post-card:${index + 1}`,
-        pullRequestId: input.pullRequest.id,
-        messageId: agentMessageId,
-        kind: "summary",
-        body,
-        status: "draft",
-        filePath: null,
-        line: null,
-        side: null,
-        startLine: null,
-        startSide: null,
-        inReplyToGitHubCommentId: null,
-        postedGitHubReviewId: null,
-        postedGitHubCommentId: null,
-        failureDetail: null,
-        createdAt: input.now,
-        updatedAt: input.now,
-      });
-      return;
-    }
-
-    const replyTarget =
-      postCard.inReplyToGitHubCommentId === null || postCard.inReplyToGitHubCommentId === undefined
-        ? null
-        : (input.detail.githubReviewComments.find(
-            (comment) => comment.id === postCard.inReplyToGitHubCommentId,
-          ) ?? null);
-    const path = postCard.path ?? replyTarget?.path ?? "";
-    const side = postCard.side ?? replyTarget?.side ?? "RIGHT";
-    const anchor = findReviewAnchor({
-      codeBlocks: input.detail.codeBlocks,
-      path,
-      line: asPositiveLine(postCard.line ?? replyTarget?.line ?? null),
-      side,
-    });
-    if (!anchor) return;
-    const startLine = asPositiveLine(postCard.startLine ?? null);
-    postCards.push({
-      id: `${agentMessageId}:post-card:${index + 1}`,
-      pullRequestId: input.pullRequest.id,
-      messageId: agentMessageId,
-      kind: "inline",
-      body,
-      status: "draft",
-      filePath: anchor.filePath,
-      line: anchor.line,
-      side: anchor.side,
-      startLine,
-      startSide: startLine === null ? null : (postCard.startSide ?? anchor.side),
-      inReplyToGitHubCommentId: replyTarget?.id ?? null,
-      postedGitHubReviewId: null,
-      postedGitHubCommentId: null,
-      failureDetail: null,
-      createdAt: input.now,
-      updatedAt: input.now,
-    });
-  });
+  const userMessageId = `message-${randomUUID()}`;
+  const agentMessageId = `message-${randomUUID()}`;
 
   return {
     userMessage: {
@@ -837,7 +1097,6 @@ function createGeneratedChatResponse(input: {
       role: "user",
       body: input.message,
       modelSelection: input.modelSelection,
-      proposedPostCardIds: [],
       createdAt: input.now,
     },
     agentMessage: {
@@ -846,10 +1105,8 @@ function createGeneratedChatResponse(input: {
       role: "agent",
       body: input.output.body.trim() || "I could not produce a useful response.",
       modelSelection: input.modelSelection,
-      proposedPostCardIds: postCards.map((card) => card.id),
       createdAt: input.now,
     },
-    postCards,
   };
 }
 
@@ -955,6 +1212,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
   }) =>
     Effect.tryPromise({
       try: async () => {
+        // @effect-diagnostics-next-line globalFetchInEffect:off - Review workspace GitHub transport uses the existing fetch wrapper.
         const response = await fetch(input.url, {
           ...input.init,
           headers: {
@@ -979,6 +1237,52 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
         };
       },
       catch: (cause) => toWorkspaceError("github.api", "GitHub API request failed.", cause),
+    });
+
+  const githubGraphql = <A>(input: {
+    readonly token: string;
+    readonly query: string;
+    readonly variables?: Record<string, unknown>;
+  }) =>
+    Effect.tryPromise({
+      try: async () => {
+        // @effect-diagnostics-next-line globalFetchInEffect:off - Review workspace GitHub transport uses the existing fetch wrapper.
+        const response = await fetch(GITHUB_GRAPHQL_URL, {
+          method: "POST",
+          headers: {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${input.token}`,
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          // @effect-diagnostics-next-line preferSchemaOverJson:off - GraphQL request bodies are ad-hoc provider payloads.
+          body: JSON.stringify({
+            query: input.query,
+            variables: input.variables ?? {},
+          }),
+        });
+        if (!response.ok) {
+          const responseBody = await response.text().catch(() => "");
+          throw new Error(
+            `GitHub GraphQL returned ${response.status}${
+              responseBody ? `: ${responseBody.slice(0, 500)}` : ""
+            }`,
+          );
+        }
+        const json = (await response.json()) as {
+          readonly data?: A;
+          readonly errors?: ReadonlyArray<unknown>;
+        };
+        if (json.errors && json.errors.length > 0) {
+          // @effect-diagnostics-next-line preferSchemaOverJson:off - Error payload is provider-owned and only summarized.
+          throw new Error(`GitHub GraphQL errors: ${JSON.stringify(json.errors).slice(0, 500)}`);
+        }
+        if (!json.data) {
+          throw new Error("GitHub GraphQL response did not include data.");
+        }
+        return json.data;
+      },
+      catch: (cause) => toWorkspaceError("github.graphql", "GitHub GraphQL request failed.", cause),
     });
 
   const githubPaginatedJson = <A>(input: { readonly token: string; readonly url: string }) =>
@@ -1016,6 +1320,175 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
           .filter(Boolean) ?? [...DEFAULT_GITHUB_OAUTH_SCOPES],
       })),
     );
+
+  const readPullRequestHealthByRoute = (input: {
+    readonly token: string;
+    readonly ownerLogin: string;
+    readonly repositoryName: string;
+    readonly number: number;
+    readonly existingRepository?: ReviewRepository;
+    readonly existingPullRequest?: ReviewPullRequest;
+    readonly tracked?: boolean;
+    readonly operation: string;
+  }) =>
+    githubGraphql<{
+      readonly repository?: Record<string, unknown> | null;
+    }>({
+      token: input.token,
+      query: REVIEW_TRACK_PULL_REQUEST_GRAPHQL_QUERY,
+      variables: {
+        owner: input.ownerLogin,
+        name: input.repositoryName,
+        number: input.number,
+      },
+    }).pipe(
+      Effect.flatMap((data) => {
+        const rawRepository = asRecord(data.repository);
+        if (!rawRepository) {
+          return Effect.fail(
+            toWorkspaceError(
+              input.operation,
+              `Repository ${input.ownerLogin}/${input.repositoryName} was not found.`,
+            ),
+          );
+        }
+        const repository = normalizeGitHubGraphQlRepository({
+          raw: rawRepository,
+          ...(input.existingRepository ? { existing: input.existingRepository } : {}),
+        });
+        if (!repository) {
+          return Effect.fail(
+            toWorkspaceError(
+              input.operation,
+              `Repository ${input.ownerLogin}/${input.repositoryName} could not be read.`,
+            ),
+          );
+        }
+        const rawPullRequest = asRecord(rawRepository.pullRequest);
+        if (!rawPullRequest) {
+          return Effect.fail(
+            toWorkspaceError(
+              input.operation,
+              `Pull request ${input.ownerLogin}/${input.repositoryName}#${input.number} was not found.`,
+            ),
+          );
+        }
+        const pullRequest = normalizeGitHubGraphQlPullRequest({
+          raw: rawPullRequest,
+          repository,
+          ...(input.existingPullRequest ? { existing: input.existingPullRequest } : {}),
+          ...(input.tracked === undefined ? {} : { tracked: input.tracked }),
+        });
+        if (!pullRequest) {
+          return Effect.fail(
+            toWorkspaceError(
+              input.operation,
+              `Pull request ${input.ownerLogin}/${input.repositoryName}#${input.number} could not be read.`,
+            ),
+          );
+        }
+        return Effect.succeed({ repository, pullRequest } satisfies GitHubPullRequestHealth);
+      }),
+      Effect.mapError((cause) =>
+        isReviewWorkspaceError(cause)
+          ? cause
+          : toWorkspaceError(input.operation, "Failed to fetch GitHub pull request status.", cause),
+      ),
+    );
+
+  const readReviewInboxHealth = (input: {
+    readonly token: string;
+    readonly previous: PersistedReviewWorkspaceState;
+  }) =>
+    Effect.gen(function* () {
+      const data = yield* githubGraphql<{
+        readonly viewer?: {
+          readonly repositories?: Record<string, unknown> | null;
+        } | null;
+      }>({
+        token: input.token,
+        query: REVIEW_INBOX_GRAPHQL_QUERY,
+        variables: {
+          repositoryFirst: REVIEW_INBOX_REPOSITORY_LIMIT,
+          pullRequestFirst: REVIEW_INBOX_PULL_REQUEST_LIMIT,
+        },
+      });
+      const previousRepos = new Map(input.previous.repositories.map((repo) => [repo.id, repo]));
+      const previousPrs = new Map(input.previous.pullRequests.map((pr) => [pr.id, pr]));
+      const repositoryById = new Map<string, ReviewRepository>();
+      const pullRequestById = new Map<string, ReviewPullRequest>();
+
+      for (const rawRepository of graphQlNodes(data.viewer?.repositories)) {
+        const repositoryId = gitHubRepositoryId(
+          parseTrimmedString(rawRepository.nameWithOwner, ""),
+        );
+        const existingRepository = previousRepos.get(repositoryId);
+        const repository = normalizeGitHubGraphQlRepository({
+          raw: rawRepository,
+          ...(existingRepository ? { existing: existingRepository } : {}),
+        });
+        if (!repository) continue;
+        repositoryById.set(repository.id, repository);
+        for (const rawPullRequest of graphQlNodes(rawRepository.openPullRequests)) {
+          const number = parsePositiveInt(rawPullRequest.number);
+          const existing = number ? previousPrs.get(`${repository.id}#${number}`) : undefined;
+          const pullRequest = normalizeGitHubGraphQlPullRequest({
+            raw: rawPullRequest,
+            repository,
+            ...(existing ? { existing } : {}),
+          });
+          if (!pullRequest) continue;
+          pullRequestById.set(pullRequest.id, pullRequest);
+        }
+      }
+
+      const retainedCandidates = input.previous.pullRequests.filter(
+        (pullRequest) =>
+          !pullRequestById.has(pullRequest.id) &&
+          shouldRetainPullRequest(input.previous, pullRequest),
+      );
+      const retained = yield* Effect.all(
+        retainedCandidates.map((pullRequest) => {
+          const repository = previousRepos.get(pullRequest.repositoryId);
+          if (!repository) return Effect.succeed(null);
+          return readPullRequestHealthByRoute({
+            token: input.token,
+            ownerLogin: repository.ownerLogin,
+            repositoryName: repository.name,
+            number: pullRequest.number,
+            existingRepository: repository,
+            existingPullRequest: pullRequest,
+            operation: "github.refresh.retainedPullRequest",
+          }).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("GitHub retained pull request sync failed.", {
+                pullRequestId: pullRequest.id,
+                cause,
+              }).pipe(
+                Effect.as({
+                  repository,
+                  pullRequest,
+                } satisfies GitHubPullRequestHealth),
+              ),
+            ),
+          );
+        }),
+        { concurrency: 4 },
+      );
+
+      for (const entry of retained) {
+        if (!entry) continue;
+        repositoryById.set(entry.repository.id, entry.repository);
+        if (shouldRetainPullRequest(input.previous, entry.pullRequest)) {
+          pullRequestById.set(entry.pullRequest.id, entry.pullRequest);
+        }
+      }
+
+      return {
+        repositories: [...repositoryById.values()],
+        pullRequests: [...pullRequestById.values()],
+      };
+    });
 
   const readPullRequestFiles = (input: {
     readonly token: string;
@@ -1102,7 +1575,6 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
         summaryDrafts: existingDetail?.summaryDrafts ?? [],
         commentDrafts: existingDetail?.commentDrafts ?? [],
         conversationMessages: existingDetail?.conversationMessages ?? [],
-        postCards: existingDetail?.postCards ?? [],
         syncedAt,
       };
       return {
@@ -1215,161 +1687,11 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
       ),
     );
 
-  const postGitHubSummaryReview = (input: {
-    readonly token: string;
-    readonly repository: ReviewRepository;
-    readonly pullRequest: ReviewPullRequest;
-    readonly body: string;
-    readonly commitId: string | null;
-  }) =>
-    githubJson<Record<string, unknown>>({
-      token: input.token,
-      url: `https://api.github.com/repos/${githubRepositoryApiPath(input.repository)}/pulls/${input.pullRequest.number}/reviews`,
-      init: {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ...(input.commitId ? { commit_id: input.commitId } : {}),
-          event: "COMMENT",
-          body: input.body,
-        }),
-      },
-    }).pipe(
-      Effect.map(({ json }) => json),
-      Effect.mapError((cause) =>
-        isReviewWorkspaceError(cause)
-          ? new ReviewWorkspaceError({
-              operation: "review.postSummaryCard",
-              detail: "Failed to post GitHub pull request review summary.",
-              cause,
-            })
-          : toWorkspaceError(
-              "review.postSummaryCard",
-              "Failed to post GitHub pull request review summary.",
-              cause,
-            ),
-      ),
-    );
-
-  const postGitHubInlineComment = (input: {
-    readonly token: string;
-    readonly repository: ReviewRepository;
-    readonly pullRequest: ReviewPullRequest;
-    readonly card: ReviewPostCard;
-    readonly commitId: string | null;
-  }) =>
-    githubJson<Record<string, unknown>>({
-      token: input.token,
-      url: `https://api.github.com/repos/${githubRepositoryApiPath(input.repository)}/pulls/${input.pullRequest.number}/comments`,
-      init: {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(
-          input.card.inReplyToGitHubCommentId
-            ? {
-                body: input.card.body,
-                in_reply_to: Number(input.card.inReplyToGitHubCommentId),
-              }
-            : {
-                body: input.card.body,
-                ...(input.commitId ? { commit_id: input.commitId } : {}),
-                path: input.card.filePath,
-                line: input.card.line,
-                side: input.card.side,
-                ...(input.card.startLine ? { start_line: input.card.startLine } : {}),
-                ...(input.card.startSide ? { start_side: input.card.startSide } : {}),
-              },
-        ),
-      },
-    }).pipe(
-      Effect.map(({ json }) => json),
-      Effect.mapError((cause) =>
-        isReviewWorkspaceError(cause)
-          ? new ReviewWorkspaceError({
-              operation: "review.postInlineCard",
-              detail: "Failed to post GitHub pull request inline comment.",
-              cause,
-            })
-          : toWorkspaceError(
-              "review.postInlineCard",
-              "Failed to post GitHub pull request inline comment.",
-              cause,
-            ),
-      ),
-    );
-
   const refreshInboxWithToken = (token: string) =>
     Effect.gen(function* () {
       const viewer = yield* readViewer(token);
-      const repos = yield* githubJson<ReadonlyArray<Record<string, unknown>>>({
-        token,
-        url: "https://api.github.com/user/repos?per_page=50&sort=pushed&affiliation=owner,collaborator,organization_member",
-      });
       const previous = yield* Ref.get(stateRef);
-      const previousRepos = new Map(previous.repositories.map((repo) => [repo.id, repo]));
-      const previousPrs = new Map(previous.pullRequests.map((pr) => [pr.id, pr]));
-      const repositories: ReviewRepository[] = [];
-      const pullRequests: ReviewPullRequest[] = [];
-
-      for (const repo of repos.json.slice(0, 50)) {
-        const fullName = String(repo.full_name ?? "");
-        if (!fullName.includes("/")) continue;
-        const [ownerLogin = "", repoName = ""] = fullName.split("/");
-        const pulls = yield* githubJson<ReadonlyArray<Record<string, unknown>>>({
-          token,
-          url: `https://api.github.com/repos/${encodeURIComponent(ownerLogin)}/${encodeURIComponent(repoName)}/pulls?state=open&sort=updated&direction=desc&per_page=20`,
-        }).pipe(Effect.catch(() => Effect.succeed({ json: [], nextUrl: null, scopes: null })));
-        if (pulls.json.length === 0) continue;
-        const repoId = `github:${fullName.toLowerCase()}`;
-        const existingRepo = previousRepos.get(repoId);
-        repositories.push({
-          id: repoId,
-          provider: "github",
-          ownerKind:
-            ((repo.owner as Record<string, unknown> | undefined)?.type ?? "") === "Organization"
-              ? "organization"
-              : "personal",
-          ownerLogin,
-          name: repoName,
-          nameWithOwner: fullName,
-          url: String(repo.html_url ?? `https://github.com/${fullName}`),
-          openPullRequestCount: pulls.json.length,
-          lastProviderUpdatedAt: typeof repo.pushed_at === "string" ? repo.pushed_at : null,
-          hidden: existingRepo?.hidden ?? false,
-        });
-        for (const pull of pulls.json) {
-          const number = Number(pull.number);
-          if (!Number.isInteger(number) || number <= 0) continue;
-          const prId = `${repoId}#${number}`;
-          const existingPr = previousPrs.get(prId);
-          pullRequests.push({
-            id: prId,
-            repositoryId: repoId,
-            provider: "github",
-            number,
-            title: String(pull.title ?? `PR #${number}`),
-            url: String(pull.html_url ?? `https://github.com/${fullName}/pull/${number}`),
-            authorLogin: String(
-              (pull.user as Record<string, unknown> | undefined)?.login ?? "unknown",
-            ),
-            baseRefName: String((pull.base as Record<string, unknown> | undefined)?.ref ?? "base"),
-            headRefName: String((pull.head as Record<string, unknown> | undefined)?.ref ?? "head"),
-            state: "open",
-            draft: Boolean(pull.draft),
-            additions: parseNonNegativeInt(pull.additions),
-            deletions: parseNonNegativeInt(pull.deletions),
-            changedFiles: parseNonNegativeInt(pull.changed_files),
-            commentCount: Number(pull.comments ?? 0) + Number(pull.review_comments ?? 0),
-            reviewDecision: null,
-            checksState: null,
-            headSha: extractPullRequestHeadSha(pull),
-            lastProviderUpdatedAt: typeof pull.updated_at === "string" ? pull.updated_at : null,
-            pinned: existingPr?.pinned ?? false,
-            hidden: existingPr?.hidden ?? false,
-          });
-        }
-      }
-
+      const inboxHealth = yield* readReviewInboxHealth({ token, previous });
       const syncedAt = yield* nowIso;
       return yield* updateState("github.refresh", (state) => ({
         ...state,
@@ -1381,10 +1703,91 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
           connectedAt: state.github.connectedAt ?? syncedAt,
           detail: null,
         },
-        repositories,
-        pullRequests,
+        repositories: inboxHealth.repositories
+          .map((repository) => ({
+            ...repository,
+            hidden:
+              state.repositories.find((entry) => entry.id === repository.id)?.hidden ??
+              repository.hidden,
+          }))
+          .filter((repository) => {
+            const retainedPullRequests = inboxHealth.pullRequests.some(
+              (pullRequest) => pullRequest.repositoryId === repository.id,
+            );
+            return repository.openPullRequestCount > 0 || retainedPullRequests;
+          }),
+        pullRequests: inboxHealth.pullRequests
+          .map((pullRequest) => {
+            const current = state.pullRequests.find((entry) => entry.id === pullRequest.id);
+            return {
+              ...pullRequest,
+              pinned: current?.pinned ?? pullRequest.pinned,
+              hidden: current?.hidden ?? pullRequest.hidden,
+              tracked: current?.tracked ?? pullRequest.tracked,
+            };
+          })
+          .filter((pullRequest) => shouldRetainPullRequest(state, pullRequest)),
         syncedAt,
       }));
+    });
+
+  const trackPullRequestWithToken = (input: ReviewTrackPullRequestInput & { token: string }) =>
+    Effect.gen(function* () {
+      const previous = yield* Ref.get(stateRef);
+      const existingRepository = previous.repositories.find(
+        (repository) =>
+          repository.provider === input.provider &&
+          repository.ownerLogin.toLowerCase() === input.ownerLogin.toLowerCase() &&
+          repository.name.toLowerCase() === input.repositoryName.toLowerCase(),
+      );
+      const existingPullRequest = existingRepository
+        ? previous.pullRequests.find(
+            (pullRequest) =>
+              pullRequest.repositoryId === existingRepository.id &&
+              pullRequest.number === input.number,
+          )
+        : undefined;
+      const result = yield* readPullRequestHealthByRoute({
+        token: input.token,
+        ownerLogin: input.ownerLogin,
+        repositoryName: input.repositoryName,
+        number: input.number,
+        ...(existingRepository ? { existingRepository } : {}),
+        ...(existingPullRequest ? { existingPullRequest } : {}),
+        tracked: true,
+        operation: "review.trackPullRequest",
+      });
+      const syncedAt = yield* nowIso;
+      return yield* updateState("review.trackPullRequest", (state) => {
+        const currentRepository = state.repositories.find(
+          (repository) => repository.id === result.repository.id,
+        );
+        const currentPullRequest = state.pullRequests.find(
+          (pullRequest) => pullRequest.id === result.pullRequest.id,
+        );
+        const repository = {
+          ...result.repository,
+          hidden: currentRepository?.hidden ?? result.repository.hidden,
+        };
+        const pullRequest = {
+          ...result.pullRequest,
+          pinned: currentPullRequest?.pinned ?? result.pullRequest.pinned,
+          hidden: currentPullRequest?.hidden ?? result.pullRequest.hidden,
+          tracked: true,
+        };
+        return {
+          ...state,
+          repositories: [
+            ...state.repositories.filter((entry) => entry.id !== repository.id),
+            repository,
+          ],
+          pullRequests: [
+            ...state.pullRequests.filter((entry) => entry.id !== pullRequest.id),
+            pullRequest,
+          ],
+          syncedAt,
+        };
+      });
     });
 
   const refreshInboxFromStoredToken = (operation: string) =>
@@ -1458,6 +1861,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
               client_id: clientId,
               scope: scopes.join(" "),
             });
+            // @effect-diagnostics-next-line globalFetchInEffect:off - Existing GitHub OAuth device flow transport uses fetch.
             const response = await fetch("https://github.com/login/device/code", {
               method: "POST",
               headers: { Accept: "application/json" },
@@ -1515,6 +1919,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
         }
         const exchange = yield* Effect.tryPromise({
           try: async () => {
+            // @effect-diagnostics-next-line globalFetchInEffect:off - Existing GitHub OAuth device flow transport uses fetch.
             const response = await fetch("https://github.com/login/oauth/access_token", {
               method: "POST",
               headers: { Accept: "application/json" },
@@ -1596,12 +2001,27 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
           pr.id === input.pullRequestId ? { ...pr, hidden: input.hidden } : pr,
         ),
       })),
+    trackPullRequest: (input) =>
+      getToken.pipe(
+        Effect.flatMap((token) =>
+          token
+            ? trackPullRequestWithToken({ ...input, token })
+            : updateState("review.trackPullRequest", (state) => ({
+                ...state,
+                github: {
+                  ...state.github,
+                  status: state.github.status === "connected" ? "error" : state.github.status,
+                  detail: "Connect GitHub with OAuth before tracking a pull request.",
+                },
+              })),
+        ),
+      ),
     upsertMcpConnection: (input) =>
       Effect.gen(function* () {
         const at = yield* nowIso;
         let saved: ReviewMcpConnection | null = null;
         yield* updateState("mcp.upsert", (state) => {
-          const id = input.id ?? `mcp-${crypto.randomUUID()}`;
+          const id = input.id ?? `mcp-${randomUUID()}`;
           const existing = state.mcpConnections.find((connection) => connection.id === id);
           saved = {
             id,
@@ -1803,6 +2223,128 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
           (entry) => entry.pullRequestId === input.pullRequestId,
         );
         const selectedModel = input.modelSelection;
+        const shouldCreateDrafts = isExplicitReviewDraftRequest(input.message);
+        if (shouldCreateDrafts && selectedModel && options?.textGeneration && detail) {
+          const runId = `run-${randomUUID()}`;
+          const generatedArtifacts = yield* options.textGeneration
+            .generateStructured({
+              cwd: serverConfig.cwd,
+              operation: "review.chatDraft",
+              prompt: formatReviewDraftPrompt({
+                pullRequest,
+                detail,
+                message: input.message,
+              }),
+              outputSchema: ReviewAgentRunOutput,
+              modelSelection: selectedModel,
+            })
+            .pipe(
+              Effect.map((output) =>
+                normalizeGeneratedReviewArtifacts({
+                  output,
+                  runId,
+                  pullRequestId: input.pullRequestId,
+                  categories: ["risk"],
+                  codeBlocks: detail.codeBlocks,
+                  now: at,
+                }),
+              ),
+              Effect.catch((cause) =>
+                failWithProviderGenerationError({
+                  kind: "chat",
+                  operation: "review.sendChatMessage",
+                  providerOperation: "review.chatDraft",
+                  pullRequestId: input.pullRequestId,
+                  modelSelection: selectedModel,
+                  detail: cause.detail,
+                }),
+              ),
+            );
+          const generatedCategories = [
+            ...new Set(generatedArtifacts.findings.map((finding) => finding.category)),
+          ];
+          const categories: ReviewStartRunInput["categories"] =
+            generatedCategories.length > 0 ? generatedCategories : ["risk"];
+          const run: ReviewRun = {
+            id: runId,
+            pullRequestId: input.pullRequestId,
+            status: "completed",
+            categories,
+            skillIds: [],
+            mcpConnectionIds: [],
+            findings: generatedArtifacts.findings,
+            summary: generatedArtifacts.summary || "Drafted GitHub review feedback from PR chat.",
+            headSha: detail.headSha ?? pullRequest.headSha,
+            summaryDraftId: `${runId}:summary`,
+            commentDraftIds: [],
+            modelSelection: selectedModel,
+            createdAt: at,
+            updatedAt: at,
+            postedByGitHubUserLogin: null,
+          };
+          const commentDrafts = generatedArtifacts.commentDrafts;
+          const baseSummaryDraft = createReviewSummaryDraft({
+            run: { ...run, commentDraftIds: commentDrafts.map((draft) => draft.id) },
+            pullRequest,
+            now: at,
+          });
+          const summaryDraft = {
+            ...baseSummaryDraft,
+            body: generatedArtifacts.summary || baseSummaryDraft.body,
+          };
+          const runWithDrafts: ReviewRun = {
+            ...run,
+            summaryDraftId: summaryDraft.id,
+            commentDraftIds: commentDrafts.map((draft) => draft.id),
+          };
+          const userMessage: ReviewConversationMessage = {
+            id: `${runId}:conversation-user`,
+            pullRequestId: input.pullRequestId,
+            role: "user",
+            body: input.message,
+            modelSelection: selectedModel,
+            createdAt: at,
+          };
+          const agentMessage = createReviewRunConversationMessage({
+            run: runWithDrafts,
+            commentDrafts,
+            summaryDraft,
+            now: at,
+          });
+
+          return yield* updateState("review.sendChatMessage", (current) => {
+            const existing = current.pullRequestDetails.find(
+              (entry) => entry.pullRequestId === input.pullRequestId,
+            ) ?? {
+              pullRequestId: input.pullRequestId,
+              headSha: pullRequest.headSha,
+              codeBlocks: [],
+              githubReviews: [],
+              githubReviewComments: [],
+              summaryDrafts: [],
+              commentDrafts: [],
+              conversationMessages: [],
+              syncedAt: null,
+            };
+            return {
+              ...current,
+              pullRequestDetails: replacePullRequestDetail(current.pullRequestDetails, {
+                ...existing,
+                summaryDrafts: [
+                  summaryDraft,
+                  ...existing.summaryDrafts.filter((draft) => draft.runId !== runId),
+                ],
+                commentDrafts: [
+                  ...commentDrafts,
+                  ...existing.commentDrafts.filter((draft) => draft.runId !== runId),
+                ],
+                conversationMessages: [...existing.conversationMessages, userMessage, agentMessage],
+              }),
+              reviewRuns: [runWithDrafts, ...current.reviewRuns],
+            };
+          });
+        }
+
         const response =
           selectedModel && options?.textGeneration && detail
             ? yield* options.textGeneration
@@ -1822,7 +2364,6 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
                     createGeneratedChatResponse({
                       output,
                       pullRequest,
-                      detail,
                       message: input.message,
                       modelSelection: selectedModel,
                       now: at,
@@ -1859,7 +2400,6 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
             summaryDrafts: [],
             commentDrafts: [],
             conversationMessages: [],
-            postCards: [],
             syncedAt: null,
           };
           return {
@@ -1871,165 +2411,9 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
                 response.userMessage,
                 response.agentMessage,
               ],
-              postCards: [...response.postCards, ...existing.postCards],
             }),
           };
         });
-      }),
-    postSummaryCard: (input) =>
-      Effect.gen(function* () {
-        const token = yield* getToken;
-        if (!token) {
-          return yield* toWorkspaceError(
-            "review.postSummaryCard",
-            "Connect GitHub with OAuth before posting a review summary.",
-          );
-        }
-        const state = yield* Ref.get(stateRef);
-        const detail = state.pullRequestDetails.find((entry) =>
-          entry.postCards.some((card) => card.id === input.postCardId),
-        );
-        const card = detail?.postCards.find((entry) => entry.id === input.postCardId);
-        if (!detail || !card || card.kind !== "summary") {
-          return yield* toWorkspaceError(
-            "review.postSummaryCard",
-            `Summary post card ${input.postCardId} was not found.`,
-          );
-        }
-        const pullRequest = state.pullRequests.find((entry) => entry.id === detail.pullRequestId);
-        const repository = pullRequest
-          ? state.repositories.find((entry) => entry.id === pullRequest.repositoryId)
-          : null;
-        if (!pullRequest || !repository) {
-          return yield* toWorkspaceError(
-            "review.postSummaryCard",
-            "Pull request for summary post card was not found.",
-          );
-        }
-        const body = input.body ?? card.body;
-        const posted = yield* postGitHubSummaryReview({
-          token,
-          repository,
-          pullRequest,
-          body,
-          commitId: detail.headSha ?? pullRequest.headSha,
-        });
-        const at = yield* nowIso;
-        const next = yield* updateState("review.postSummaryCard", (current) => ({
-          ...current,
-          pullRequestDetails: current.pullRequestDetails.map((entry) =>
-            entry.pullRequestId === detail.pullRequestId
-              ? {
-                  ...entry,
-                  postCards: entry.postCards.map((existingCard) =>
-                    existingCard.id === card.id
-                      ? {
-                          ...existingCard,
-                          body,
-                          status: "posted",
-                          postedGitHubReviewId: String(posted.id ?? ""),
-                          updatedAt: at,
-                          failureDetail: null,
-                        }
-                      : existingCard,
-                  ),
-                }
-              : entry,
-          ),
-        }));
-        yield* refreshPullRequestDetailWithToken({
-          token,
-          pullRequestId: detail.pullRequestId,
-          operation: "review.postSummaryCard.refresh",
-        }).pipe(Effect.ignore);
-        return next;
-      }),
-    postInlineCard: (input) =>
-      Effect.gen(function* () {
-        const token = yield* getToken;
-        if (!token) {
-          return yield* toWorkspaceError(
-            "review.postInlineCard",
-            "Connect GitHub with OAuth before posting an inline comment.",
-          );
-        }
-        const state = yield* Ref.get(stateRef);
-        const detail = state.pullRequestDetails.find((entry) =>
-          entry.postCards.some((card) => card.id === input.postCardId),
-        );
-        const card = detail?.postCards.find((entry) => entry.id === input.postCardId);
-        if (!detail || !card || card.kind !== "inline") {
-          return yield* toWorkspaceError(
-            "review.postInlineCard",
-            `Inline post card ${input.postCardId} was not found.`,
-          );
-        }
-        const nextCard: ReviewPostCard = {
-          ...card,
-          ...(input.body !== undefined ? { body: input.body } : {}),
-          ...(input.filePath !== undefined ? { filePath: input.filePath } : {}),
-          ...(input.line !== undefined ? { line: input.line } : {}),
-          ...(input.side !== undefined ? { side: input.side } : {}),
-          ...(input.startLine !== undefined ? { startLine: input.startLine } : {}),
-          ...(input.startSide !== undefined ? { startSide: input.startSide } : {}),
-          ...(input.inReplyToGitHubCommentId !== undefined
-            ? { inReplyToGitHubCommentId: input.inReplyToGitHubCommentId }
-            : {}),
-        };
-        if (
-          !nextCard.inReplyToGitHubCommentId &&
-          (!nextCard.filePath || !nextCard.line || !nextCard.side)
-        ) {
-          return yield* toWorkspaceError(
-            "review.postInlineCard",
-            "Inline post card needs a file, line, and side before posting.",
-          );
-        }
-        const pullRequest = state.pullRequests.find((entry) => entry.id === detail.pullRequestId);
-        const repository = pullRequest
-          ? state.repositories.find((entry) => entry.id === pullRequest.repositoryId)
-          : null;
-        if (!pullRequest || !repository) {
-          return yield* toWorkspaceError(
-            "review.postInlineCard",
-            "Pull request for inline post card was not found.",
-          );
-        }
-        const posted = yield* postGitHubInlineComment({
-          token,
-          repository,
-          pullRequest,
-          card: nextCard,
-          commitId: detail.headSha ?? pullRequest.headSha,
-        });
-        const at = yield* nowIso;
-        const next = yield* updateState("review.postInlineCard", (current) => ({
-          ...current,
-          pullRequestDetails: current.pullRequestDetails.map((entry) =>
-            entry.pullRequestId === detail.pullRequestId
-              ? {
-                  ...entry,
-                  postCards: entry.postCards.map((existingCard) =>
-                    existingCard.id === card.id
-                      ? {
-                          ...nextCard,
-                          status: "posted",
-                          postedGitHubCommentId: String(posted.id ?? ""),
-                          updatedAt: at,
-                          failureDetail: null,
-                        }
-                      : existingCard,
-                  ),
-                }
-              : entry,
-          ),
-        }));
-        yield* refreshPullRequestDetailWithToken({
-          token,
-          pullRequestId: detail.pullRequestId,
-          operation: "review.postInlineCard.refresh",
-        }).pipe(Effect.ignore);
-        return next;
       }),
     startRun: (input) =>
       Effect.gen(function* () {
@@ -2056,7 +2440,7 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
           );
         }
         const at = yield* nowIso;
-        const runId = `run-${crypto.randomUUID()}`;
+        const runId = `run-${randomUUID()}`;
         const detailResult = yield* readPullRequestReviewDetail({
           token,
           repository,

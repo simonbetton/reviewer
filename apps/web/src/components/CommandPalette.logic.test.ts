@@ -207,6 +207,7 @@ describe("buildPullRequestActionItems", () => {
       lastProviderUpdatedAt: "2026-03-24T12:00:00.000Z",
       pinned: false,
       hidden: false,
+      tracked: false,
     };
 
     const items = buildPullRequestActionItems({
@@ -260,6 +261,7 @@ describe("buildPullRequestActionItems", () => {
       lastProviderUpdatedAt: null,
       pinned: false,
       hidden: true,
+      tracked: false,
     };
 
     const items = buildPullRequestActionItems({

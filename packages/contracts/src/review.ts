@@ -223,6 +223,7 @@ export const ReviewPullRequest = Schema.Struct({
   lastProviderUpdatedAt: Schema.NullOr(IsoDateTime),
   pinned: Schema.Boolean,
   hidden: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  tracked: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type ReviewPullRequest = typeof ReviewPullRequest.Type;
 
@@ -398,40 +399,12 @@ export type ReviewGitHubReviewComment = typeof ReviewGitHubReviewComment.Type;
 export const ReviewConversationRole = Schema.Literals(["user", "agent"]);
 export type ReviewConversationRole = typeof ReviewConversationRole.Type;
 
-export const ReviewPostCardKind = Schema.Literals(["summary", "inline"]);
-export type ReviewPostCardKind = typeof ReviewPostCardKind.Type;
-
-export const ReviewPostCardStatus = Schema.Literals(["draft", "dismissed", "posted", "failed"]);
-export type ReviewPostCardStatus = typeof ReviewPostCardStatus.Type;
-
-export const ReviewPostCard = Schema.Struct({
-  id: TrimmedNonEmptyString,
-  pullRequestId: TrimmedNonEmptyString,
-  messageId: TrimmedNonEmptyString,
-  kind: ReviewPostCardKind,
-  body: Schema.String,
-  status: ReviewPostCardStatus,
-  filePath: Schema.NullOr(TrimmedNonEmptyString),
-  line: Schema.NullOr(PositiveInt),
-  side: Schema.NullOr(ReviewCommentSide),
-  startLine: Schema.NullOr(PositiveInt),
-  startSide: Schema.NullOr(ReviewCommentSide),
-  inReplyToGitHubCommentId: Schema.NullOr(Schema.String),
-  postedGitHubReviewId: Schema.NullOr(Schema.String),
-  postedGitHubCommentId: Schema.NullOr(Schema.String),
-  failureDetail: Schema.NullOr(Schema.String),
-  createdAt: IsoDateTime,
-  updatedAt: IsoDateTime,
-});
-export type ReviewPostCard = typeof ReviewPostCard.Type;
-
 export const ReviewConversationMessage = Schema.Struct({
   id: TrimmedNonEmptyString,
   pullRequestId: TrimmedNonEmptyString,
   role: ReviewConversationRole,
   body: Schema.String,
   modelSelection: Schema.NullOr(ModelSelection),
-  proposedPostCardIds: Schema.Array(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 export type ReviewConversationMessage = typeof ReviewConversationMessage.Type;
@@ -445,7 +418,6 @@ export const ReviewPullRequestDetail = Schema.Struct({
   summaryDrafts: Schema.Array(ReviewSummaryDraft),
   commentDrafts: Schema.Array(ReviewCommentDraft),
   conversationMessages: Schema.Array(ReviewConversationMessage),
-  postCards: Schema.Array(ReviewPostCard),
   syncedAt: Schema.NullOr(IsoDateTime),
 });
 export type ReviewPullRequestDetail = typeof ReviewPullRequestDetail.Type;
@@ -481,6 +453,14 @@ export const ReviewSetPullRequestHiddenInput = Schema.Struct({
   hidden: Schema.Boolean,
 });
 export type ReviewSetPullRequestHiddenInput = typeof ReviewSetPullRequestHiddenInput.Type;
+
+export const ReviewTrackPullRequestInput = Schema.Struct({
+  provider: ReviewIntegrationProvider,
+  ownerLogin: TrimmedNonEmptyString,
+  repositoryName: TrimmedNonEmptyString,
+  number: PositiveInt,
+});
+export type ReviewTrackPullRequestInput = typeof ReviewTrackPullRequestInput.Type;
 
 export const ReviewStartRunInput = Schema.Struct({
   pullRequestId: TrimmedNonEmptyString,
@@ -533,24 +513,6 @@ export const ReviewSendChatMessageInput = Schema.Struct({
 });
 export type ReviewSendChatMessageInput = typeof ReviewSendChatMessageInput.Type;
 
-export const ReviewPostSummaryCardInput = Schema.Struct({
-  postCardId: TrimmedNonEmptyString,
-  body: Schema.optional(Schema.String),
-});
-export type ReviewPostSummaryCardInput = typeof ReviewPostSummaryCardInput.Type;
-
-export const ReviewPostInlineCardInput = Schema.Struct({
-  postCardId: TrimmedNonEmptyString,
-  body: Schema.optional(Schema.String),
-  filePath: Schema.optional(TrimmedNonEmptyString),
-  line: Schema.optional(PositiveInt),
-  side: Schema.optional(ReviewCommentSide),
-  startLine: Schema.optional(Schema.NullOr(PositiveInt)),
-  startSide: Schema.optional(Schema.NullOr(ReviewCommentSide)),
-  inReplyToGitHubCommentId: Schema.optional(Schema.NullOr(Schema.String)),
-});
-export type ReviewPostInlineCardInput = typeof ReviewPostInlineCardInput.Type;
-
 export const REVIEW_WS_METHODS = {
   getSnapshot: "review.getSnapshot",
   subscribe: "review.subscribe",
@@ -560,6 +522,7 @@ export const REVIEW_WS_METHODS = {
   setPullRequestPinned: "review.setPullRequestPinned",
   setRepositoryHidden: "review.setRepositoryHidden",
   setPullRequestHidden: "review.setPullRequestHidden",
+  trackPullRequest: "review.trackPullRequest",
   upsertMcpConnection: "review.upsertMcpConnection",
   removeMcpConnection: "review.removeMcpConnection",
   installSkill: "review.installSkill",
@@ -570,8 +533,6 @@ export const REVIEW_WS_METHODS = {
   deleteSummaryDraft: "review.deleteSummaryDraft",
   updateCommentDraft: "review.updateCommentDraft",
   sendChatMessage: "review.sendChatMessage",
-  postSummaryCard: "review.postSummaryCard",
-  postInlineCard: "review.postInlineCard",
   startRun: "review.startRun",
   submitRun: "review.submitRun",
 } as const;

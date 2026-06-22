@@ -45,6 +45,7 @@ const pullRequest: ReviewPullRequest = {
   lastProviderUpdatedAt: null,
   pinned: false,
   hidden: false,
+  tracked: false,
 };
 
 const snapshot: ReviewInboxSnapshot = {

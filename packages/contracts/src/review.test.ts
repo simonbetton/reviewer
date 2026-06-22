@@ -6,6 +6,7 @@ import {
   ReviewDeleteSummaryDraftInput,
   ReviewInboxSnapshot,
   ReviewPullRequest,
+  ReviewPullRequestDetail,
   ReviewRepository,
   ReviewRun,
 } from "./review.ts";
@@ -13,6 +14,7 @@ import {
 const decodeReviewDeleteSummaryDraftInput = Schema.decodeUnknownSync(ReviewDeleteSummaryDraftInput);
 const decodeReviewRepository = Schema.decodeUnknownSync(ReviewRepository);
 const decodeReviewPullRequest = Schema.decodeUnknownSync(ReviewPullRequest);
+const decodeReviewPullRequestDetail = Schema.decodeUnknownSync(ReviewPullRequestDetail);
 const decodeReviewRun = Schema.decodeUnknownSync(ReviewRun);
 const decodeReviewInboxSnapshot = Schema.decodeUnknownSync(ReviewInboxSnapshot);
 
@@ -26,6 +28,7 @@ describe("review contracts", () => {
       summaryDraftId: "run-1:summary",
     });
     expect(REVIEW_WS_METHODS.deleteSummaryDraft).toBe("review.deleteSummaryDraft");
+    expect(REVIEW_WS_METHODS.trackPullRequest).toBe("review.trackPullRequest");
   });
 
   it("defaults hidden review item state for persisted repositories and pull requests", () => {
@@ -69,6 +72,7 @@ describe("review contracts", () => {
 
     expect(repository.hidden).toBe(false);
     expect(pullRequest.hidden).toBe(false);
+    expect(pullRequest.tracked).toBe(false);
     expect(pullRequest.headSha).toBe(null);
     expect("lastInteractedAt" in repository).toBe(false);
     expect("pinned" in repository).toBe(false);
@@ -111,5 +115,42 @@ describe("review contracts", () => {
     expect(run.commentDraftIds).toEqual([]);
     expect(run.modelSelection).toBe(null);
     expect(snapshot.pullRequestDetails).toEqual([]);
+  });
+
+  it("ignores legacy review post cards in pull request details", () => {
+    const detail = decodeReviewPullRequestDetail({
+      pullRequestId: "github:owner/repo#1",
+      headSha: "head-1",
+      codeBlocks: [],
+      githubReviews: [],
+      githubReviewComments: [],
+      summaryDrafts: [],
+      commentDrafts: [],
+      conversationMessages: [],
+      postCards: [
+        {
+          id: "legacy-card",
+          pullRequestId: "github:owner/repo#1",
+          messageId: "message-1",
+          kind: "summary",
+          body: "legacy post card",
+          status: "draft",
+          filePath: null,
+          line: null,
+          side: null,
+          startLine: null,
+          startSide: null,
+          inReplyToGitHubCommentId: null,
+          postedGitHubReviewId: null,
+          postedGitHubCommentId: null,
+          failureDetail: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      syncedAt: null,
+    });
+
+    expect("postCards" in detail).toBe(false);
   });
 });

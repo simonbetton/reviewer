@@ -7,8 +7,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { createModelSelection } from "@t3tools/shared/model";
 import { ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
-
-import { ServerSecretStore, layer as ServerSecretStoreLive } from "../auth/ServerSecretStore.ts";
+import { layer as ServerSecretStoreLive, ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
 import {
   findJsonSchemaMissingRequiredPropertyPaths,
@@ -48,6 +47,96 @@ function jsonResponse(value: unknown, headers?: Record<string, string>): Respons
     headers: {
       "content-type": "application/json",
       ...headers,
+    },
+  });
+}
+
+function githubPullRequestNode(
+  overrides: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  const number = Number(overrides.number ?? 1);
+  return {
+    number,
+    title: "Improve provider review",
+    url: `https://github.com/octocat/reviewer/pull/${number}`,
+    author: { login: "contrib" },
+    baseRefName: "main",
+    headRefName: "feature/review",
+    state: "OPEN",
+    merged: false,
+    isDraft: false,
+    additions: 1,
+    deletions: 0,
+    changedFiles: 1,
+    comments: { totalCount: 0 },
+    reviewThreads: { totalCount: 0 },
+    reviewDecision: null,
+    updatedAt: "2026-01-03T00:00:00.000Z",
+    headRefOid: "head-1",
+    statusCheckRollup: { state: "SUCCESS" },
+    commits: {
+      nodes: [
+        {
+          commit: {
+            oid: "head-1",
+            statusCheckRollup: { state: "SUCCESS" },
+          },
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+function githubRepositoryNode(input?: {
+  readonly pullRequests?: ReadonlyArray<Record<string, unknown>>;
+  readonly openPullRequestCount?: number;
+}): Record<string, unknown> {
+  const pullRequests = input?.pullRequests ?? [githubPullRequestNode()];
+  const openPullRequestCount =
+    input?.openPullRequestCount ??
+    pullRequests.filter((pullRequest) => pullRequest.state === "OPEN").length;
+  return {
+    name: "reviewer",
+    nameWithOwner: "octocat/reviewer",
+    url: "https://github.com/octocat/reviewer",
+    pushedAt: "2026-01-02T00:00:00.000Z",
+    owner: { __typename: "User", login: "octocat" },
+    openPullRequestCount: { totalCount: openPullRequestCount },
+    openPullRequests: {
+      nodes: pullRequests.filter((pullRequest) => pullRequest.state === "OPEN"),
+    },
+  };
+}
+
+function githubInboxGraphqlResponse(
+  repositories: ReadonlyArray<Record<string, unknown>> = [githubRepositoryNode()],
+): Response {
+  return jsonResponse({
+    data: {
+      viewer: {
+        repositories: {
+          nodes: repositories,
+        },
+      },
+    },
+  });
+}
+
+function githubTrackGraphqlResponse(input: {
+  readonly repository?: Record<string, unknown> | null;
+  readonly pullRequest?: Record<string, unknown> | null;
+}): Response {
+  const repository =
+    input.repository === undefined ? githubRepositoryNode({ pullRequests: [] }) : input.repository;
+  return jsonResponse({
+    data: {
+      repository: repository
+        ? {
+            ...repository,
+            pullRequest: input.pullRequest ?? githubPullRequestNode(),
+          }
+        : null,
     },
   });
 }
@@ -92,32 +181,8 @@ function installReviewRunGitHubFetchMock() {
       );
     }
 
-    if (url.startsWith("https://api.github.com/user/repos?")) {
-      return jsonResponse([
-        {
-          full_name: "octocat/reviewer",
-          html_url: "https://github.com/octocat/reviewer",
-          owner: { type: "User" },
-          pushed_at: "2026-01-02T00:00:00.000Z",
-        },
-      ]);
-    }
-
-    if (url.startsWith("https://api.github.com/repos/octocat/reviewer/pulls?")) {
-      return jsonResponse([
-        {
-          number: 1,
-          title: "Improve provider review",
-          html_url: "https://github.com/octocat/reviewer/pull/1",
-          user: { login: "contrib" },
-          base: { ref: "main" },
-          head: { ref: "feature/review", sha: "head-1" },
-          draft: false,
-          comments: 0,
-          review_comments: 0,
-          updated_at: "2026-01-03T00:00:00.000Z",
-        },
-      ]);
+    if (url === "https://api.github.com/graphql") {
+      return githubInboxGraphqlResponse();
     }
 
     if (url === "https://api.github.com/repos/octocat/reviewer/pulls/1/files?per_page=100") {
@@ -240,31 +305,20 @@ it.layer(NodeServices.layer)("ReviewWorkspace", (it) => {
           );
         }
 
-        if (url.startsWith("https://api.github.com/user/repos?")) {
-          return jsonResponse([
-            {
-              full_name: "octocat/reviewer",
-              html_url: "https://github.com/octocat/reviewer",
-              owner: { type: "User" },
-              pushed_at: "2026-01-02T00:00:00.000Z",
-            },
-          ]);
-        }
-
-        if (url.startsWith("https://api.github.com/repos/octocat/reviewer/pulls?")) {
-          return jsonResponse([
-            {
-              number: 1,
-              title: "Improve review inbox",
-              html_url: "https://github.com/octocat/reviewer/pull/1",
-              user: { login: "contrib" },
-              base: { ref: "main" },
-              head: { ref: "feature/review", sha: "head-1" },
-              draft: false,
-              comments: 1,
-              review_comments: 2,
-              updated_at: "2026-01-03T00:00:00.000Z",
-            },
+        if (url === "https://api.github.com/graphql") {
+          return githubInboxGraphqlResponse([
+            githubRepositoryNode({
+              pullRequests: [
+                githubPullRequestNode({
+                  title: "Improve review inbox",
+                  isDraft: true,
+                  comments: { totalCount: 1 },
+                  reviewThreads: { totalCount: 2 },
+                  reviewDecision: "REVIEW_REQUIRED",
+                  statusCheckRollup: { state: "PENDING" },
+                }),
+              ],
+            }),
           ]);
         }
 
@@ -287,6 +341,10 @@ it.layer(NodeServices.layer)("ReviewWorkspace", (it) => {
           expect(snapshot.pullRequests.map((pullRequest) => pullRequest.title)).toEqual([
             "Improve review inbox",
           ]);
+          expect(snapshot.pullRequests[0]?.draft).toBe(true);
+          expect(snapshot.pullRequests[0]?.commentCount).toBe(3);
+          expect(snapshot.pullRequests[0]?.reviewDecision).toBe("REVIEW_REQUIRED");
+          expect(snapshot.pullRequests[0]?.checksState).toBe("PENDING");
           expect(snapshot.groups[0]?.repositories[0]?.hidden).toBe(false);
           expect(snapshot.pullRequests[0]?.hidden).toBe(false);
           expect(authHeaders.every((header) => header === "Bearer persisted-token")).toBe(true);
@@ -327,6 +385,256 @@ it.layer(NodeServices.layer)("ReviewWorkspace", (it) => {
     }),
   );
 
+  it.effect("tracks a route-selected pull request as lightweight metadata", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-review-workspace-track-route-test-",
+      });
+      const originalFetch = globalThis.fetch;
+      const graphqlBodies: unknown[] = [];
+      const fetchMock = async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+        if (url === "https://api.github.com/graphql") {
+          graphqlBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return githubTrackGraphqlResponse({
+            repository: githubRepositoryNode({ pullRequests: [], openPullRequestCount: 0 }),
+            pullRequest: githubPullRequestNode({
+              number: 12,
+              title: "Merged route target",
+              state: "MERGED",
+              merged: true,
+              comments: { totalCount: 4 },
+              reviewThreads: { totalCount: 5 },
+              reviewDecision: "APPROVED",
+              statusCheckRollup: { state: "FAILURE" },
+              headRefOid: "route-head-12",
+            }),
+          });
+        }
+
+        throw new Error(`Unexpected GitHub URL ${url}`);
+      };
+      globalThis.fetch = Object.assign(fetchMock, {
+        preconnect: originalFetch.preconnect,
+      }) as typeof fetch;
+
+      try {
+        yield* Effect.gen(function* () {
+          const secretStore = yield* ServerSecretStore;
+          yield* secretStore.set(githubTokenSecretName, textEncoder.encode("persisted-token"));
+
+          const workspace = yield* ReviewWorkspace.make();
+          const snapshot = yield* workspace.trackPullRequest({
+            provider: "github",
+            ownerLogin: "octocat",
+            repositoryName: "reviewer",
+            number: 12,
+          });
+
+          expect(graphqlBodies).toHaveLength(1);
+          expect(snapshot.pullRequestDetails).toEqual([]);
+          expect(snapshot.groups[0]?.repositories[0]?.openPullRequestCount).toBe(0);
+          expect(snapshot.groups[0]?.repositories[0]?.nameWithOwner).toBe("octocat/reviewer");
+
+          const pullRequest = snapshot.pullRequests[0];
+          expect(pullRequest?.id).toBe("github:octocat/reviewer#12");
+          expect(pullRequest?.tracked).toBe(true);
+          expect(pullRequest?.state).toBe("merged");
+          expect(pullRequest?.commentCount).toBe(9);
+          expect(pullRequest?.reviewDecision).toBe("APPROVED");
+          expect(pullRequest?.checksState).toBe("FAILURE");
+          expect(pullRequest?.headSha).toBe("route-head-12");
+        }).pipe(provideReviewWorkspaceTestServices(baseDir));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }),
+  );
+
+  it.effect("handles trackPullRequest connection and not-found failures", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-review-workspace-track-failure-test-",
+      });
+
+      yield* Effect.gen(function* () {
+        const disconnectedWorkspace = yield* ReviewWorkspace.make();
+        const disconnectedSnapshot = yield* disconnectedWorkspace.trackPullRequest({
+          provider: "github",
+          ownerLogin: "octocat",
+          repositoryName: "missing",
+          number: 404,
+        });
+
+        expect(disconnectedSnapshot.github.detail).toBe(
+          "Connect GitHub with OAuth before tracking a pull request.",
+        );
+        expect(disconnectedSnapshot.pullRequests).toEqual([]);
+
+        const secretStore = yield* ServerSecretStore;
+        yield* secretStore.set(githubTokenSecretName, textEncoder.encode("persisted-token"));
+
+        const originalFetch = globalThis.fetch;
+        const fetchMock = async (input: Parameters<typeof fetch>[0]) => {
+          const url =
+            typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+          if (url === "https://api.github.com/graphql") {
+            return githubTrackGraphqlResponse({ repository: null });
+          }
+
+          throw new Error(`Unexpected GitHub URL ${url}`);
+        };
+        globalThis.fetch = Object.assign(fetchMock, {
+          preconnect: originalFetch.preconnect,
+        }) as typeof fetch;
+
+        try {
+          const connectedWorkspace = yield* ReviewWorkspace.make();
+          const result = yield* connectedWorkspace
+            .trackPullRequest({
+              provider: "github",
+              ownerLogin: "octocat",
+              repositoryName: "missing",
+              number: 404,
+            })
+            .pipe(Effect.result);
+
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) {
+            expect(result.failure.detail).toBe("Repository octocat/missing was not found.");
+          }
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      }).pipe(provideReviewWorkspaceTestServices(baseDir));
+    }),
+  );
+
+  it.effect("retains inactive tracked pull requests and prunes inactive untracked ones", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-review-workspace-retention-test-",
+      });
+      let inboxCallCount = 0;
+      const exactCallCountByNumber = new Map<number, number>();
+      const originalFetch = globalThis.fetch;
+      const fetchMock = async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+
+        if (url === "https://api.github.com/user") {
+          return jsonResponse(
+            {
+              id: 1,
+              login: "octocat",
+              name: "Octo Cat",
+              avatar_url: "https://github.com/images/error/octocat_happy.gif",
+              html_url: "https://github.com/octocat",
+            },
+            { "x-oauth-scopes": "repo, read:org" },
+          );
+        }
+
+        if (url === "https://api.github.com/graphql") {
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            readonly query?: string;
+            readonly variables?: { readonly number?: number };
+          };
+          if (body.query?.includes("T3ReviewInbox")) {
+            inboxCallCount += 1;
+            return githubInboxGraphqlResponse([
+              githubRepositoryNode({
+                pullRequests:
+                  inboxCallCount === 1
+                    ? [
+                        githubPullRequestNode({ number: 1, title: "Tracked later" }),
+                        githubPullRequestNode({ number: 2, title: "Untracked stale" }),
+                      ]
+                    : [],
+                openPullRequestCount: inboxCallCount === 1 ? 2 : 0,
+              }),
+            ]);
+          }
+
+          const number = Number(body.variables?.number ?? 0);
+          const exactCallCount = (exactCallCountByNumber.get(number) ?? 0) + 1;
+          exactCallCountByNumber.set(number, exactCallCount);
+          if (number === 1) {
+            return githubTrackGraphqlResponse({
+              repository: githubRepositoryNode({ pullRequests: [], openPullRequestCount: 0 }),
+              pullRequest: githubPullRequestNode({
+                number: 1,
+                title: exactCallCount === 1 ? "Tracked later" : "Merged tracked",
+                state: exactCallCount === 1 ? "OPEN" : "MERGED",
+                merged: exactCallCount > 1,
+              }),
+            });
+          }
+          if (number === 2) {
+            return githubTrackGraphqlResponse({
+              repository: githubRepositoryNode({ pullRequests: [], openPullRequestCount: 0 }),
+              pullRequest: githubPullRequestNode({
+                number: 2,
+                title: "Closed untracked",
+                state: "CLOSED",
+                merged: false,
+              }),
+            });
+          }
+        }
+
+        throw new Error(`Unexpected GitHub URL ${url}`);
+      };
+      globalThis.fetch = Object.assign(fetchMock, {
+        preconnect: originalFetch.preconnect,
+      }) as typeof fetch;
+
+      try {
+        yield* Effect.gen(function* () {
+          const secretStore = yield* ServerSecretStore;
+          yield* secretStore.set(githubTokenSecretName, textEncoder.encode("persisted-token"));
+
+          const workspace = yield* ReviewWorkspace.make();
+          const firstRefresh = yield* workspace.refreshInbox;
+          expect(
+            firstRefresh.pullRequests.map((pullRequest) => pullRequest.number).toSorted(),
+          ).toEqual([1, 2]);
+
+          const tracked = yield* workspace.trackPullRequest({
+            provider: "github",
+            ownerLogin: "octocat",
+            repositoryName: "reviewer",
+            number: 1,
+          });
+          expect(
+            tracked.pullRequests.find((pullRequest) => pullRequest.number === 1)?.tracked,
+          ).toBe(true);
+
+          const secondRefresh = yield* workspace.refreshInbox;
+          expect(secondRefresh.pullRequests.map((pullRequest) => pullRequest.number)).toEqual([1]);
+          expect(secondRefresh.pullRequests[0]?.state).toBe("merged");
+          expect(secondRefresh.pullRequests[0]?.tracked).toBe(true);
+          expect(secondRefresh.pullRequests[0]?.title).toBe("Merged tracked");
+          expect(secondRefresh.groups[0]?.repositories[0]?.openPullRequestCount).toBe(0);
+        }).pipe(provideReviewWorkspaceTestServices(baseDir));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }),
+  );
+
   it.effect("reviews real pull request files and posts a GitHub review", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -355,31 +663,18 @@ it.layer(NodeServices.layer)("ReviewWorkspace", (it) => {
           );
         }
 
-        if (url.startsWith("https://api.github.com/user/repos?")) {
-          return jsonResponse([
-            {
-              full_name: "octocat/reviewer",
-              html_url: "https://github.com/octocat/reviewer",
-              owner: { type: "User" },
-              pushed_at: "2026-01-02T00:00:00.000Z",
-            },
-          ]);
-        }
-
-        if (url.startsWith("https://api.github.com/repos/octocat/reviewer/pulls?")) {
-          return jsonResponse([
-            {
-              number: 1,
-              title: "Improve review posting",
-              html_url: "https://github.com/octocat/reviewer/pull/1",
-              user: { login: "contrib" },
-              base: { ref: "main" },
-              head: { ref: "feature/review", sha: "head-1" },
-              draft: false,
-              comments: 0,
-              review_comments: 0,
-              updated_at: "2026-01-03T00:00:00.000Z",
-            },
+        if (url === "https://api.github.com/graphql") {
+          return githubInboxGraphqlResponse([
+            githubRepositoryNode({
+              pullRequests: [
+                githubPullRequestNode({
+                  title: "Improve review posting",
+                  additions: 42,
+                  deletions: 6,
+                  changedFiles: 2,
+                }),
+              ],
+            }),
           ]);
         }
 
@@ -574,6 +869,134 @@ it.layer(NodeServices.layer)("ReviewWorkspace", (it) => {
           );
           expect(detail?.commentDrafts[0]?.side).toBe("RIGHT");
           expect(detail?.commentDrafts[0]?.line).toBe(8);
+        }).pipe(provideReviewWorkspaceTestServices(baseDir));
+      } finally {
+        restoreFetch();
+      }
+    }),
+  );
+
+  it.effect("answers pull request chat without creating review drafts", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-review-workspace-chat-question-test-",
+      });
+      const restoreFetch = installReviewRunGitHubFetchMock();
+      const operations: string[] = [];
+      const textGeneration = makeStructuredTextGeneration((input) => {
+        operations.push(input.operation);
+        return Effect.succeed({
+          body: "This PR updates the review workspace flow.",
+        });
+      });
+
+      try {
+        yield* Effect.gen(function* () {
+          const secretStore = yield* ServerSecretStore;
+          yield* secretStore.set(githubTokenSecretName, textEncoder.encode("persisted-token"));
+
+          const workspace = yield* ReviewWorkspace.make({ textGeneration });
+          const snapshot = yield* workspace.refreshInbox;
+          const pullRequest = snapshot.pullRequests[0];
+          expect(pullRequest?.id).toBe("github:octocat/reviewer#1");
+
+          yield* workspace.refreshPullRequestDetail({ pullRequestId: pullRequest!.id });
+          const next = yield* workspace.sendChatMessage({
+            pullRequestId: pullRequest!.id,
+            message: "What changed in this PR?",
+            modelSelection: defaultModelSelection,
+          });
+
+          const detail = next.pullRequestDetails.find(
+            (entry) => entry.pullRequestId === pullRequest!.id,
+          );
+          expect(operations).toEqual(["review.chat"]);
+          expect(next.reviewRuns).toHaveLength(0);
+          expect(detail?.summaryDrafts).toHaveLength(0);
+          expect(detail?.commentDrafts).toHaveLength(0);
+          expect(detail?.conversationMessages.map((message) => message.role)).toEqual([
+            "user",
+            "agent",
+          ]);
+          expect(detail?.conversationMessages[1]?.body).toBe(
+            "This PR updates the review workspace flow.",
+          );
+        }).pipe(provideReviewWorkspaceTestServices(baseDir));
+      } finally {
+        restoreFetch();
+      }
+    }),
+  );
+
+  it.effect("creates review drafts from an explicit pull request chat draft request", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-review-workspace-chat-draft-test-",
+      });
+      const restoreFetch = installReviewRunGitHubFetchMock();
+      const operations: string[] = [];
+      const textGeneration = makeStructuredTextGeneration((input) => {
+        operations.push(input.operation);
+        return Effect.succeed({
+          summary: "Draft summary from chat.",
+          comments: [
+            {
+              path: "apps/server/src/review/ReviewWorkspace.ts",
+              line: 8,
+              side: "RIGHT",
+              startLine: null,
+              startSide: null,
+              category: "correctness",
+              severity: "major",
+              confidence: 90,
+              title: "Preserve chat Q&A mode",
+              explanation: "The chat request explicitly asked for review feedback.",
+              body: "Please keep GitHub-facing drafts out of the chat timeline.",
+              suggestedFix: null,
+            },
+          ],
+        });
+      });
+
+      try {
+        yield* Effect.gen(function* () {
+          const secretStore = yield* ServerSecretStore;
+          yield* secretStore.set(githubTokenSecretName, textEncoder.encode("persisted-token"));
+
+          const workspace = yield* ReviewWorkspace.make({ textGeneration });
+          const snapshot = yield* workspace.refreshInbox;
+          const pullRequest = snapshot.pullRequests[0];
+          expect(pullRequest?.id).toBe("github:octocat/reviewer#1");
+
+          yield* workspace.refreshPullRequestDetail({ pullRequestId: pullRequest!.id });
+          const next = yield* workspace.sendChatMessage({
+            pullRequestId: pullRequest!.id,
+            message: "Please draft an inline review comment for this PR.",
+            modelSelection: defaultModelSelection,
+          });
+
+          const run = next.reviewRuns[0];
+          const detail = next.pullRequestDetails.find(
+            (entry) => entry.pullRequestId === pullRequest!.id,
+          );
+          expect(operations).toEqual(["review.chatDraft"]);
+          expect(run?.status).toBe("completed");
+          expect(run?.categories).toEqual(["correctness"]);
+          expect(run?.summary).toBe("Draft summary from chat.");
+          expect(run?.commentDraftIds).toHaveLength(1);
+          expect(detail?.summaryDrafts[0]?.body).toBe("Draft summary from chat.");
+          expect(detail?.commentDrafts[0]?.body).toBe(
+            "Please keep GitHub-facing drafts out of the chat timeline.",
+          );
+          expect(detail?.conversationMessages.map((message) => message.role)).toEqual([
+            "user",
+            "agent",
+          ]);
+          expect(detail?.conversationMessages[1]?.body).toContain(
+            "Prepared 1 inline draft comment",
+          );
         }).pipe(provideReviewWorkspaceTestServices(baseDir));
       } finally {
         restoreFetch();
