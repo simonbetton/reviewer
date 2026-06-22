@@ -28,7 +28,9 @@ export function ReviewSidebar() {
   const selectRepository = useReviewAppStore((store) => store.selectRepository);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [refreshing, setRefreshing] = useState(false);
-  const refreshInbox = useAtomCommand(reviewEnvironment.refreshInbox, { reportFailure: false });
+  const refreshInbox = useAtomCommand(reviewEnvironment.refreshInbox, {
+    reportFailure: false,
+  });
 
   const groups = useMemo(() => snapshot?.groups ?? [], [snapshot]);
 
@@ -36,7 +38,10 @@ export function ReviewSidebar() {
     if (primaryEnvironmentId === null) return;
     setRefreshing(true);
     try {
-      const result = await refreshInbox({ environmentId: primaryEnvironmentId, input: {} });
+      const result = await refreshInbox({
+        environmentId: primaryEnvironmentId,
+        input: {},
+      });
       if (result._tag === "Success") {
         useReviewAppStore.getState().setSnapshot(result.value);
       }
@@ -114,7 +119,10 @@ export function ReviewSidebar() {
                   variant="ghost"
                   className="ml-1 text-xs"
                   onClick={() =>
-                    setExpandedGroups((current) => ({ ...current, [group.id]: !expanded }))
+                    setExpandedGroups((current) => ({
+                      ...current,
+                      [group.id]: !expanded,
+                    }))
                   }
                 >
                   {expanded
