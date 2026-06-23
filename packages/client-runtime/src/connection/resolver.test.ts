@@ -2,6 +2,7 @@ import { EnvironmentId, type DesktopSshEnvironmentTarget } from "@t3tools/contra
 import { RelayEnvironmentConnectScope } from "@t3tools/contracts/relay";
 import { RelayClientTracer } from "@t3tools/shared/relayTracing";
 import { describe, expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -95,6 +96,7 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   readonly authorizeBearer?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeBearer"];
   readonly authorizeDpop?: RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization["Service"]["authorizeDpop"];
   readonly primaryBearerToken?: string;
+  readonly primaryWebSocketTicket?: string;
   readonly prepareSsh?: ClientCapabilities.SshEnvironmentGateway["Service"]["prepare"];
 }) => {
   const profiles = new Map(
@@ -171,6 +173,12 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
       ClientCapabilities.PrimaryEnvironmentAuth,
       ClientCapabilities.PrimaryEnvironmentAuth.of({
         bearerToken: Effect.succeed(Option.fromNullishOr(options?.primaryBearerToken)),
+        webSocketTicket: Effect.succeed(
+          Option.map(Option.fromNullishOr(options?.primaryWebSocketTicket), (ticket) => ({
+            ticket,
+            expiresAt: DateTime.makeUnsafe("2026-06-06T00:00:00.000Z"),
+          })),
+        ),
       }),
     ),
     Layer.succeed(
@@ -219,6 +227,24 @@ describe("ConnectionResolver", () => {
         httpAuthorization: null,
         target,
       });
+    }),
+  );
+  it.effect("prepares a primary environment with a websocket ticket when available", () =>
+    Effect.gen(function* () {
+      const brokerLayer = yield* makeDependencies({
+        primaryWebSocketTicket: "primary-ticket",
+      });
+      const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
+      const target = new PrimaryConnectionTarget({
+        environmentId: ENVIRONMENT_ID,
+        label: "Primary",
+        httpBaseUrl: "http://127.0.0.1:3777",
+        wsBaseUrl: "ws://127.0.0.1:3777",
+      });
+
+      expect((yield* broker.prepare(catalogEntry(target))).socketUrl).toBe(
+        "ws://127.0.0.1:3777/ws?wsTicket=primary-ticket",
+      );
     }),
   );
 

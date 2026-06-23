@@ -185,16 +185,22 @@ function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
     return null;
   }
 
-  const resolvedHttpBaseUrl =
-    configuredHttpBaseUrl ??
-    (configuredWsBaseUrl?.startsWith("wss:")
-      ? swapBaseUrlProtocol(configuredWsBaseUrl, "https:", "websocket-base-url")
-      : swapBaseUrlProtocol(configuredWsBaseUrl!, "http:", "websocket-base-url"));
-  const resolvedWsBaseUrl =
-    configuredWsBaseUrl ??
-    (configuredHttpBaseUrl?.startsWith("https:")
+  let resolvedHttpBaseUrl: string;
+  let resolvedWsBaseUrl: string;
+  if (configuredHttpBaseUrl && configuredWsBaseUrl) {
+    resolvedHttpBaseUrl = configuredHttpBaseUrl;
+    resolvedWsBaseUrl = configuredWsBaseUrl;
+  } else if (configuredHttpBaseUrl) {
+    resolvedHttpBaseUrl = configuredHttpBaseUrl;
+    resolvedWsBaseUrl = configuredHttpBaseUrl.startsWith("https:")
       ? swapBaseUrlProtocol(configuredHttpBaseUrl, "wss:", "http-base-url")
-      : swapBaseUrlProtocol(configuredHttpBaseUrl!, "ws:", "http-base-url"));
+      : swapBaseUrlProtocol(configuredHttpBaseUrl, "ws:", "http-base-url");
+  } else {
+    resolvedHttpBaseUrl = configuredWsBaseUrl.startsWith("wss:")
+      ? swapBaseUrlProtocol(configuredWsBaseUrl, "https:", "websocket-base-url")
+      : swapBaseUrlProtocol(configuredWsBaseUrl, "http:", "websocket-base-url");
+    resolvedWsBaseUrl = configuredWsBaseUrl;
+  }
 
   return {
     source: "configured",

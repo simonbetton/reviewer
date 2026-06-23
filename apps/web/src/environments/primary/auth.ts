@@ -26,6 +26,7 @@ const PrimaryEnvironmentRequestOperation = Schema.Literals([
   "fetch-session-state",
   "exchange-bootstrap-credential",
   "fetch-environment-descriptor",
+  "issue-websocket-ticket",
   "create-pairing-credential",
   "list-pairing-links",
   "revoke-pairing-link",
@@ -374,6 +375,21 @@ export async function createServerPairingCredential(input?: {
   } catch (error) {
     throw PrimaryEnvironmentRequestError.fromCause({
       operation: "create-pairing-credential",
+      cause: error,
+    });
+  }
+}
+
+export async function issuePrimaryWebSocketTicket() {
+  try {
+    return await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
+        Effect.flatMap((client) => client.auth.webSocketTicket({ headers: {} })),
+      ),
+    );
+  } catch (error) {
+    throw PrimaryEnvironmentRequestError.fromCause({
+      operation: "issue-websocket-ticket",
       cause: error,
     });
   }

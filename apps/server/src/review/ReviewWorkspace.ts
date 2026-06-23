@@ -6,6 +6,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
@@ -1154,11 +1155,15 @@ export const make = Effect.fn("makeReviewWorkspace")(function* (options?: {
     );
 
   const loadToken = secretStore.get(GITHUB_OAUTH_TOKEN_SECRET_NAME).pipe(
-    Effect.map((bytes) => {
-      if (!bytes) return null;
-      const token = textDecoder.decode(bytes).trim();
-      return token.length > 0 ? token : null;
-    }),
+    Effect.map(
+      Option.match({
+        onNone: () => null,
+        onSome: (bytes) => {
+          const token = textDecoder.decode(bytes).trim();
+          return token.length > 0 ? token : null;
+        },
+      }),
+    ),
     Effect.catch((cause) =>
       Effect.logWarning("Failed to load persisted GitHub OAuth token.", {
         secret: GITHUB_OAUTH_TOKEN_SECRET_NAME,

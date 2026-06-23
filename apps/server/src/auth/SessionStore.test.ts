@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
@@ -11,6 +12,9 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as AuthSessions from "../persistence/AuthSessions.ts";
 import * as SessionStore from "./SessionStore.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
+import { base64UrlDecodeUtf8, base64UrlEncode, signPayload } from "./utils.ts";
+
+const SIGNING_SECRET_NAME = "server-signing-key";
 
 const makeServerConfigLayer = (
   overrides?: Partial<Pick<ServerConfig.ServerConfig["Service"], "desktopBootstrapToken">>,
@@ -32,6 +36,15 @@ const makeSessionStoreLayer = (
   SessionStore.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
     Layer.provide(ServerSecretStore.layer),
+    Layer.provide(makeServerConfigLayer(overrides)),
+  );
+
+const makeSessionStoreWithSecretsLayer = (
+  overrides?: Partial<Pick<ServerConfig.ServerConfig["Service"], "desktopBootstrapToken">>,
+) =>
+  SessionStore.layer.pipe(
+    Layer.provide(SqlitePersistenceMemory),
+    Layer.provideMerge(ServerSecretStore.layer),
     Layer.provide(makeServerConfigLayer(overrides)),
   );
 
@@ -59,6 +72,22 @@ const failingSessionLookupCredentialLayer = Layer.effect(
   Layer.provide(makeServerConfigLayer()),
 );
 
+function rewriteSessionTokenPayload(
+  token: string,
+  signingSecret: Uint8Array,
+  rewrite: (claims: Record<string, unknown>) => Record<string, unknown>,
+): string {
+  const [encodedPayload] = token.split(".");
+  if (!encodedPayload) {
+    throw new Error("Expected issued session token to contain a payload.");
+  }
+
+  const rewrittenPayload = base64UrlEncode(
+    JSON.stringify(rewrite(JSON.parse(base64UrlDecodeUtf8(encodedPayload)))),
+  );
+  return `${rewrittenPayload}.${signPayload(rewrittenPayload, signingSecret)}`;
+}
+
 it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
   it.effect("issues and verifies signed browser session tokens", () =>
     Effect.gen(function* () {
@@ -83,6 +112,29 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       expect(verified.client.browser).toBe("Electron");
       expect(verified.expiresAt?.toString()).toBe(issued.expiresAt.toString());
     }).pipe(Effect.provide(makeSessionStoreLayer())),
+  );
+  it.effect("verifies legacy signed session tokens with row-backed scopes and method", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const secretStore = yield* ServerSecretStore.ServerSecretStore;
+      const issued = yield* sessions.issue({
+        method: "bearer-access-token",
+        subject: "legacy-session",
+        scopes: ["orchestration:read", "review:write"],
+      });
+      const signingSecret = Option.getOrThrow(yield* secretStore.get(SIGNING_SECRET_NAME));
+      const legacyToken = rewriteSessionTokenPayload(issued.token, signingSecret, (claims) => {
+        const { kind: _kind, method: _method, scopes: _scopes, ...legacyClaims } = claims;
+        return legacyClaims;
+      });
+
+      const verified = yield* sessions.verify(legacyToken);
+
+      expect(verified.sessionId).toBe(issued.sessionId);
+      expect(verified.subject).toBe("legacy-session");
+      expect(verified.method).toBe("bearer-access-token");
+      expect(verified.scopes).toEqual(["orchestration:read", "review:write"]);
+    }).pipe(Effect.provide(makeSessionStoreWithSecretsLayer())),
   );
   it.effect("rejects malformed session tokens", () =>
     Effect.gen(function* () {

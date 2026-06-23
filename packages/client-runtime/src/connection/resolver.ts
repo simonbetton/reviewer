@@ -46,10 +46,13 @@ const isBearerProfile = Schema.is(BearerConnectionProfile);
 const isSshProfile = Schema.is(SshConnectionProfile);
 const isBearerCredential = Schema.is(BearerConnectionCredential);
 
-function primarySocketUrl(target: PrimaryConnectionTarget): string {
+function primarySocketUrl(target: PrimaryConnectionTarget, wsTicket?: string): string {
   const url = new URL(target.wsBaseUrl);
   if (url.pathname === "" || url.pathname === "/") {
     url.pathname = "/ws";
+  }
+  if (wsTicket !== undefined) {
+    url.searchParams.set("wsTicket", wsTicket);
   }
   return url.toString();
 }
@@ -63,11 +66,15 @@ const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary
   ) {
     const bearerToken = yield* auth.bearerToken;
     if (Option.isNone(bearerToken)) {
+      const webSocketTicket = yield* auth.webSocketTicket;
       return {
         environmentId: target.environmentId,
         label: target.label,
         httpBaseUrl: target.httpBaseUrl,
-        socketUrl: primarySocketUrl(target),
+        socketUrl: primarySocketUrl(
+          target,
+          Option.isSome(webSocketTicket) ? webSocketTicket.value.ticket : undefined,
+        ),
         httpAuthorization: null,
         target,
       } satisfies PreparedConnection;

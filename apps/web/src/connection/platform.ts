@@ -35,6 +35,7 @@ import * as Stream from "effect/Stream";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
 import { primaryEnvironmentHttpLayer } from "../environments/primary/httpLayer";
 import { readPrimaryEnvironmentTarget } from "../environments/primary/target";
+import { issuePrimaryWebSocketTicket } from "../environments/primary/auth";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -197,6 +198,14 @@ const capabilitiesLayer = Layer.effectContext(
             detail: `Could not load the desktop primary credential: ${String(cause)}`,
           }),
       }).pipe(Effect.map(Option.fromNullishOr)),
+      webSocketTicket: Effect.tryPromise({
+        try: issuePrimaryWebSocketTicket,
+        catch: (cause) =>
+          new ConnectionTransientError({
+            reason: "remote-unavailable",
+            detail: `Could not issue a primary websocket ticket: ${String(cause)}`,
+          }),
+      }).pipe(Effect.map(Option.some)),
     });
     const ssh = SshEnvironmentGateway.of({
       provision: Effect.fn("web.connectionPlatform.ssh.provision")(function* (target) {
@@ -224,15 +233,15 @@ const capabilitiesLayer = Layer.effectContext(
             }),
           catch: sshPreparationError,
         });
-        if (bootstrap.pairingToken === null) {
+        const pairingToken = bootstrap.pairingToken;
+        if (pairingToken === null) {
           return yield* new ConnectionBlockedError({
             reason: "authentication",
             detail: "The SSH environment did not issue a pairing credential.",
           });
         }
         const access = yield* Effect.tryPromise({
-          try: () =>
-            bridge.bootstrapSshBearerSession(bootstrap.httpBaseUrl, bootstrap.pairingToken!),
+          try: () => bridge.bootstrapSshBearerSession(bootstrap.httpBaseUrl, pairingToken),
           catch: sshPreparationError,
         });
         return {

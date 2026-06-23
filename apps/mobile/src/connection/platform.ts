@@ -116,7 +116,10 @@ const capabilitiesLayer = Layer.succeedContext(
   ).pipe(
     Context.add(
       PrimaryEnvironmentAuth,
-      PrimaryEnvironmentAuth.of({ bearerToken: Effect.succeed(Option.none()) }),
+      PrimaryEnvironmentAuth.of({
+        bearerToken: Effect.succeed(Option.none()),
+        webSocketTicket: Effect.succeed(Option.none()),
+      }),
     ),
     Context.add(
       RelayDeviceIdentity,
