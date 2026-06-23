@@ -62,6 +62,8 @@ import {
 } from "./reviewSidebarLogic";
 
 const EMPTY_REVIEW_GROUPS = [] as const;
+const REVIEW_ROW_ICON_SLOT_CLASS = "inline-flex size-4 shrink-0 items-center justify-center";
+const REVIEW_ROW_META_TEXT_CLASS = "inline-flex h-4 shrink-0 items-center text-[10px] leading-4";
 
 function unwrapCommandResult<A, E>(result: AtomCommandResult<A, E>): A {
   if (result._tag === "Success") {
@@ -115,7 +117,6 @@ function resolvePullRequestIconClassName({
 }) {
   return cn(
     sizeClassName,
-    "shrink-0",
     hidden
       ? "text-muted-foreground/35"
       : isActive
@@ -209,13 +210,15 @@ function ReviewPullRequestRow({
         onClick={() => onSelect(repository, pullRequest)}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-          <GitPullRequestIcon
-            className={resolvePullRequestIconClassName({
-              hidden,
-              isActive,
-              sizeClassName: "size-3",
-            })}
-          />
+          <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+            <GitPullRequestIcon
+              className={resolvePullRequestIconClassName({
+                hidden,
+                isActive,
+                sizeClassName: "size-3",
+              })}
+            />
+          </span>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -234,35 +237,39 @@ function ReviewPullRequestRow({
             </TooltipPopup>
           </Tooltip>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {hidden ? <span className="text-[10px] text-muted-foreground/50">Hidden</span> : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {hidden ? (
+            <span className={`${REVIEW_ROW_META_TEXT_CLASS} text-muted-foreground/50`}>Hidden</span>
+          ) : null}
           {!hidden ? (
             <span
               className={
                 pullRequest.state === "open" && !pullRequest.draft
-                  ? "text-[10px] text-muted-foreground/45"
-                  : "text-[10px] text-warning-foreground/70"
+                  ? `${REVIEW_ROW_META_TEXT_CLASS} text-muted-foreground/45`
+                  : `${REVIEW_ROW_META_TEXT_CLASS} text-warning-foreground/70`
               }
             >
               {stateLabel}
             </span>
           ) : null}
           {!hidden && reviewDecisionLabel ? (
-            <span className="max-w-20 truncate text-[10px] text-muted-foreground/55">
+            <span
+              className={`${REVIEW_ROW_META_TEXT_CLASS} max-w-20 truncate text-muted-foreground/55`}
+            >
               {reviewDecisionLabel}
             </span>
           ) : null}
           {!hidden && checksStateLabel ? (
-            <span className="max-w-20 truncate text-[10px] text-muted-foreground/55">
+            <span
+              className={`${REVIEW_ROW_META_TEXT_CLASS} max-w-20 truncate text-muted-foreground/55`}
+            >
               {checksStateLabel}
             </span>
           ) : null}
           {!hidden && reviewed ? (
             <Tooltip>
               <TooltipTrigger
-                render={
-                  <span className="inline-flex size-3 items-center justify-center text-success" />
-                }
+                render={<span className={`${REVIEW_ROW_ICON_SLOT_CLASS} text-success`} />}
               >
                 <CheckCircle2Icon className="size-3" />
               </TooltipTrigger>
@@ -272,7 +279,9 @@ function ReviewPullRequestRow({
           {!hidden && timestamp ? (
             <span
               className={
-                isActive ? "text-[10px] text-foreground/72" : "text-[10px] text-muted-foreground/40"
+                isActive
+                  ? `${REVIEW_ROW_META_TEXT_CLASS} text-foreground/72`
+                  : `${REVIEW_ROW_META_TEXT_CLASS} text-muted-foreground/40`
               }
             >
               {formatRelativeTimeLabel(timestamp)}
@@ -313,17 +322,19 @@ function PinnedPullRequestRow({
         className={cn(resolvePullRequestRowClassName({ isActive }), "gap-2 py-1.5")}
         onClick={() => onSelect(repository, pullRequest)}
       >
-        <FolderGit2Icon
-          className={
-            pullRequest.draft
-              ? "size-3.5 shrink-0 text-warning"
-              : resolvePullRequestIconClassName({
-                  hidden: false,
-                  isActive,
-                  sizeClassName: "size-3.5",
-                })
-          }
-        />
+        <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+          <FolderGit2Icon
+            className={
+              pullRequest.draft
+                ? "size-3.5 text-warning"
+                : resolvePullRequestIconClassName({
+                    hidden: false,
+                    isActive,
+                    sizeClassName: "size-3.5",
+                  })
+            }
+          />
+        </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn("truncate text-xs font-medium", isActive && "text-foreground")}>
             #{pullRequest.number} {pullRequest.title}
@@ -337,12 +348,18 @@ function PinnedPullRequestRow({
             {repository.nameWithOwner}
           </span>
         </span>
-        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {reviewed ? <CheckCircle2Icon className="size-3 text-success" /> : null}
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {reviewed ? (
+            <span className={`${REVIEW_ROW_ICON_SLOT_CLASS} text-success`}>
+              <CheckCircle2Icon className="size-3" />
+            </span>
+          ) : null}
           {timestamp ? (
             <span
               className={
-                isActive ? "text-[10px] text-foreground/72" : "text-[10px] text-muted-foreground/40"
+                isActive
+                  ? `${REVIEW_ROW_META_TEXT_CLASS} text-foreground/72`
+                  : `${REVIEW_ROW_META_TEXT_CLASS} text-muted-foreground/40`
               }
             >
               {formatRelativeTimeLabel(timestamp)}
@@ -384,12 +401,16 @@ function ReviewHiddenSection({
         className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-muted-foreground/65 text-xs outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => toggle(id)}
       >
-        <ChevronRightIcon
-          className={`size-3 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-        />
-        {icon ?? <EyeOffIcon className="size-3.5 shrink-0" />}
+        <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+          <ChevronRightIcon
+            className={`size-3 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+          />
+        </span>
+        <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+          {icon ?? <EyeOffIcon className="size-3.5" />}
+        </span>
         <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-        <span className="shrink-0 text-[10px]">{count}</span>
+        <span className={REVIEW_ROW_META_TEXT_CLASS}>{count}</span>
       </button>
       {expanded ? <div className="mt-0.5">{children}</div> : null}
     </Item>
@@ -459,17 +480,21 @@ function ReviewRepositoryRow({
           className="min-w-0 gap-2 px-2 py-1.5 pr-8 text-left"
           onClick={() => toggleRepository(repository.id)}
         >
-          <ChevronRightIcon
-            className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
-              repositoryExpanded ? "rotate-90" : ""
-            }`}
-          />
-          <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground/60" />
+          <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+            <ChevronRightIcon
+              className={`size-3.5 text-muted-foreground/70 transition-transform duration-150 ${
+                repositoryExpanded ? "rotate-90" : ""
+              }`}
+            />
+          </span>
+          <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+            <FolderGit2Icon className="size-3.5 text-muted-foreground/60" />
+          </span>
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="truncate text-xs font-medium text-foreground/90">
               {repository.name}
             </span>
-            <span className="shrink-0 text-[10px] text-muted-foreground/60">
+            <span className={`${REVIEW_ROW_META_TEXT_CLASS} text-muted-foreground/60`}>
               {repository.openPullRequestCount}
             </span>
           </span>
@@ -500,7 +525,7 @@ function ReviewRepositoryRow({
             label="Tracked pull requests"
             count={inactivePullRequests.length}
             itemKind="sub"
-            icon={<GitPullRequestIcon className="size-3.5 shrink-0" />}
+            icon={<GitPullRequestIcon className="size-3.5" />}
           >
             <SidebarMenuSub className="mx-0 border-l-0 px-0 py-0">
               {inactivePullRequests.map((pullRequest) => (
@@ -563,12 +588,14 @@ function HiddenRepositoryRow({
         className="min-w-0 flex-1 gap-2 px-2 py-1.5 text-left"
         onClick={() => onSelectRepository(repository)}
       >
-        <EyeOffIcon className="size-4 shrink-0 text-muted-foreground/50" />
+        <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+          <EyeOffIcon className="size-4 text-muted-foreground/50" />
+        </span>
         <span className="flex min-w-0 flex-1 items-center gap-2">
           <span className="truncate text-xs font-medium text-muted-foreground/80">
             {repository.name}
           </span>
-          <span className="shrink-0 text-[10px] text-muted-foreground/50">
+          <span className={`${REVIEW_ROW_META_TEXT_CLASS} text-muted-foreground/50`}>
             {repository.openPullRequestCount}
           </span>
         </span>
@@ -628,11 +655,13 @@ function ReviewOwnerGroup({
         className="mb-1 flex h-7 w-full cursor-pointer items-center gap-1 rounded-md px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => toggleOwnerGroup(group.id)}
       >
-        <ChevronRightIcon
-          className={`size-3 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-        />
+        <span className={REVIEW_ROW_ICON_SLOT_CLASS}>
+          <ChevronRightIcon
+            className={`size-3 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+          />
+        </span>
         <span className="min-w-0 flex-1 truncate text-left">{group.title}</span>
-        <span className="shrink-0">{group.repositories.length}</span>
+        <span className={REVIEW_ROW_META_TEXT_CLASS}>{group.repositories.length}</span>
       </button>
       {expanded ? (
         <SidebarMenu>
