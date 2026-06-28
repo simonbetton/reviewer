@@ -95,7 +95,7 @@ function RootRouteView() {
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [pathname]);
+  }, []);
 
   if (pathname === "/pair") {
     return (
