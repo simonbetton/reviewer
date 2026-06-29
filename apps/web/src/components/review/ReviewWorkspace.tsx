@@ -23,6 +23,7 @@ import {
   type PointerEvent,
   type ReactNode,
   type RefObject,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -1570,7 +1571,6 @@ function ReviewChatComposer({
   selectedModelSelection,
   sendingChat,
   listRef,
-  shouldAutoScrollRef,
   onModelSelectionChange,
   onSendChatMessage,
 }: {
@@ -1583,7 +1583,6 @@ function ReviewChatComposer({
   readonly selectedModelSelection: ModelSelection;
   readonly sendingChat: boolean;
   readonly listRef: RefObject<LegendListRef | null>;
-  readonly shouldAutoScrollRef: RefObject<boolean>;
   readonly onModelSelectionChange: (selection: ModelSelection) => void;
   readonly onSendChatMessage: (message: string, modelSelection: ModelSelection) => Promise<boolean>;
 }) {
@@ -1692,8 +1691,6 @@ function ReviewChatComposer({
         composerImagesRef={composerImagesRef}
         composerTerminalContextsRef={composerTerminalContextsRef}
         composerElementContextsRef={composerElementContextsRef}
-        shouldAutoScrollRef={shouldAutoScrollRef}
-        scheduleStickToBottom={scrollToEnd}
         onSend={sendComposerMessage}
         onInterrupt={() => undefined}
         onImplementPlanInNewThread={() => undefined}
@@ -1749,9 +1746,12 @@ function ReviewConversationThread({
   readonly onSendChatMessage: (message: string, modelSelection: ModelSelection) => Promise<boolean>;
 }) {
   const listRef = useRef<LegendListRef | null>(null);
-  const shouldAutoScrollRef = useRef(true);
   const [isAtEnd, setIsAtEnd] = useState(true);
-  shouldAutoScrollRef.current = isAtEnd;
+  const onTimelineAnchorReady = useCallback(
+    (_messageId: MessageId, _anchorIndex: number) => {},
+    [],
+  );
+  const onTimelineAnchorSizeChanged = useCallback((_messageId: MessageId, _size: number) => {}, []);
   const timelineMessages = useMemo(
     () => reviewConversationChatMessages(conversationMessages, pendingChatMessage),
     [conversationMessages, pendingChatMessage],
@@ -1793,6 +1793,7 @@ function ReviewConversationThread({
               listRef={listRef}
               timelineEntries={timelineEntries}
               latestTurn={null}
+              runningTurnId={null}
               turnDiffSummaryByAssistantMessageId={emptyTurnDiffSummaryByAssistantMessageId}
               routeThreadKey={routeThreadKey}
               onOpenTurnDiff={() => undefined}
@@ -1805,6 +1806,10 @@ function ReviewConversationThread({
               resolvedTheme={resolvedTheme}
               timestampFormat={timestampFormat}
               workspaceRoot={undefined}
+              anchorMessageId={null}
+              onAnchorReady={onTimelineAnchorReady}
+              onAnchorSizeChanged={onTimelineAnchorSizeChanged}
+              contentInsetEndAdjustment={144}
               onIsAtEndChange={setIsAtEnd}
             />
           )}
@@ -1832,7 +1837,6 @@ function ReviewConversationThread({
           selectedModelSelection={selectedModelSelection}
           sendingChat={sendingChat}
           listRef={listRef}
-          shouldAutoScrollRef={shouldAutoScrollRef}
           onModelSelectionChange={onModelSelectionChange}
           onSendChatMessage={onSendChatMessage}
         />
