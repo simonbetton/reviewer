@@ -15,7 +15,7 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+export const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "SB Code Review (Alpha)";
 export const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";
@@ -87,7 +87,9 @@ function setPlistJson(plistPath, key, value) {
 }
 
 function runChecked(command, args) {
-  const result = NodeChildProcess.spawnSync(command, args, { encoding: "utf8" });
+  const result = NodeChildProcess.spawnSync(command, args, {
+    encoding: "utf8",
+  });
   if (result.status === 0) {
     return;
   }

@@ -56,7 +56,10 @@ function mockProcess(exitCode: number) {
 }
 
 function iconResizeSpawnerLayer(
-  commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>,
+  commands: Array<{
+    readonly command: string;
+    readonly args: ReadonlyArray<string>;
+  }>,
   exitCodes: ReadonlyArray<number>,
 ) {
   let commandIndex = 0;
@@ -83,7 +86,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
+    assert.equal(resolveDesktopProductName("0.0.17"), "SB Code Review (Alpha)");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
   });
 
@@ -229,7 +232,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it.effect("preserves both Linux icon resize failures with structural context", () => {
-    const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = [];
+    const commands: Array<{
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+    }> = [];
 
     return Effect.gen(function* () {
       const error = yield* stageLinuxIconSize("source.png", "target.png", 512, false).pipe(
@@ -363,7 +369,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("preserves known passkey signing configuration errors at the build boundary", () => {
     const decodingCause = new Error("publishable-key-decode-failed");
-    const knownError = new InvalidMacPasskeyPublishableKeyError({ cause: decodingCause });
+    const knownError = new InvalidMacPasskeyPublishableKeyError({
+      cause: decodingCause,
+    });
     const error = MacPasskeySigningConfigurationResolutionError.fromCause(knownError);
 
     assert.strictEqual(error, knownError);
