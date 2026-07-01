@@ -138,7 +138,7 @@ interface TimelineRowActivityState {
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
-const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
+const TIMELINE_LIST_BASE_FOOTER_HEIGHT_PX = 12;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 // ---------------------------------------------------------------------------
@@ -331,6 +331,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       ? { ...config, onReady: handleAnchorReady, onSizeChanged: handleAnchorSizeChanged }
       : undefined;
   }, [anchorMessageId, handleAnchorReady, handleAnchorSizeChanged, rows]);
+  const listFooter = useMemo(
+    () => (
+      <div
+        aria-hidden="true"
+        className="shrink-0"
+        style={{
+          height: contentInsetEndAdjustment + TIMELINE_LIST_BASE_FOOTER_HEIGHT_PX,
+        }}
+      />
+    ),
+    [contentInsetEndAdjustment],
+  );
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -412,7 +424,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           estimatedItemSize={90}
           initialScrollAtEnd
           {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-          contentInsetEndAdjustment={contentInsetEndAdjustment}
           maintainVisibleContentPosition={{
             data: true,
             size: false,
@@ -420,7 +431,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           onScroll={handleScroll}
           className="scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5"
           ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={TIMELINE_LIST_FOOTER}
+          ListFooterComponent={listFooter}
         />
       </TimelineRowActivityCtx>
     </TimelineRowCtx>

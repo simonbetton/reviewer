@@ -916,8 +916,14 @@ label:has(> select#reasoning-effort) select {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
-/* Collapsed (default): single-line cells truncate so arbitrary chat content
-   cannot blow the column out; the footer toggle expands cells to wrap. */
+/* Collapsed: single-line cells truncate so arbitrary chat content cannot blow
+   the column out; the footer toggle expands cells to wrap. */
+.chat-markdown .chat-markdown-table-container[data-expanded="false"] table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
 .chat-markdown .chat-markdown-table-container[data-expanded="false"] th,
 .chat-markdown .chat-markdown-table-container[data-expanded="false"] td {
   overflow: hidden;
@@ -926,8 +932,13 @@ label:has(> select#reasoning-effort) select {
   white-space: nowrap;
 }
 
+.chat-markdown .chat-markdown-table-container[data-expanded="true"] table {
+  min-width: max-content;
+}
+
 .chat-markdown .chat-markdown-table-container[data-expanded="true"] td {
   max-width: 24rem;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 

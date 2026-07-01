@@ -1809,7 +1809,7 @@ function ReviewConversationThread({
               anchorMessageId={null}
               onAnchorReady={onTimelineAnchorReady}
               onAnchorSizeChanged={onTimelineAnchorSizeChanged}
-              contentInsetEndAdjustment={144}
+              contentInsetEndAdjustment={0}
               onIsAtEndChange={setIsAtEnd}
             />
           )}

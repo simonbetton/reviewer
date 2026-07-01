@@ -21,6 +21,7 @@ vi.mock("@legendapp/list/react", async () => {
       onSizeChanged?: (size: number) => void;
     };
     contentInsetEndAdjustment?: number;
+    contentInset?: { top: number; left: number; right: number; bottom: number };
     className?: string;
     maintainScrollAtEnd?: boolean;
     maintainVisibleContentPosition?:
@@ -43,7 +44,8 @@ vi.mock("@legendapp/list/react", async () => {
         data-anchor-max-size={props.anchoredEndSpace?.anchorMaxSize}
         data-anchor-offset={props.anchoredEndSpace?.anchorOffset}
         data-anchor-on-ready={Boolean(props.anchoredEndSpace?.onReady)}
-        data-content-inset-end={props.contentInsetEndAdjustment}
+        data-content-inset-end={props.contentInset?.bottom ?? props.contentInsetEndAdjustment}
+        data-content-inset-bottom={props.contentInset?.bottom}
         data-class-name={props.className}
         data-maintain-scroll-at-end={props.maintainScrollAtEnd}
         data-maintain-visible-content-position={
@@ -227,7 +229,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-anchor-offset="16"');
     expect(markup).toContain('data-anchor-on-ready="true"');
     expect(markup).not.toContain("data-anchor-max-size=");
-    expect(markup).toContain('data-content-inset-end="144"');
+    expect(markup).toContain('style="height:156px"');
     expect(markup).toContain("[overflow-anchor:none]");
     expect(markup).not.toContain("data-maintain-scroll-at-end=");
     expect(markup).toContain('data-maintain-visible-content-position="object"');
