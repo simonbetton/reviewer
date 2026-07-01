@@ -1752,6 +1752,7 @@ function ReviewConversationThread({
     [],
   );
   const onTimelineAnchorSizeChanged = useCallback((_messageId: MessageId, _size: number) => {}, []);
+  const onManualNavigation = useCallback(() => {}, []);
   const timelineMessages = useMemo(
     () => reviewConversationChatMessages(conversationMessages, pendingChatMessage),
     [conversationMessages, pendingChatMessage],
@@ -1811,6 +1812,7 @@ function ReviewConversationThread({
               onAnchorSizeChanged={onTimelineAnchorSizeChanged}
               contentInsetEndAdjustment={0}
               onIsAtEndChange={setIsAtEnd}
+              onManualNavigation={onManualNavigation}
             />
           )}
           {!isAtEnd && timelineEntries.length > 0 ? (

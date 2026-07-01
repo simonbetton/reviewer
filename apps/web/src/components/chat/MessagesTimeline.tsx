@@ -492,7 +492,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             estimatedItemSize={90}
             initialScrollAtEnd
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={contentInsetEndAdjustment}
             maintainScrollAtEnd={
               anchoredEndSpace
                 ? false
