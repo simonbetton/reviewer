@@ -57,9 +57,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const macosWindowControlsStyle =
     isElectron && isMacPlatform(navigator.platform)
-      ? ({
-          "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET,
-        } as CSSProperties)
+      ? ({ "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET } as CSSProperties)
       : undefined;
 
   useEffect(() => {

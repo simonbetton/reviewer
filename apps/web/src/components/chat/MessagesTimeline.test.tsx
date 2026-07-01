@@ -21,7 +21,6 @@ vi.mock("@legendapp/list/react", async () => {
       onSizeChanged?: (size: number) => void;
     };
     contentInsetEndAdjustment?: number;
-    contentInset?: { top: number; left: number; right: number; bottom: number };
     className?: string;
     maintainScrollAtEnd?:
       | boolean
@@ -53,8 +52,7 @@ vi.mock("@legendapp/list/react", async () => {
         data-anchor-max-size={props.anchoredEndSpace?.anchorMaxSize}
         data-anchor-offset={props.anchoredEndSpace?.anchorOffset}
         data-anchor-on-ready={Boolean(props.anchoredEndSpace?.onReady)}
-        data-content-inset-end={props.contentInset?.bottom ?? props.contentInsetEndAdjustment}
-        data-content-inset-bottom={props.contentInset?.bottom}
+        data-content-inset-end={props.contentInsetEndAdjustment}
         data-class-name={props.className}
         data-maintain-scroll-at-end={props.maintainScrollAtEnd ? "enabled" : undefined}
         data-maintain-scroll-at-end-animated={
