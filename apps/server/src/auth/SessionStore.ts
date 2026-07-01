@@ -402,6 +402,11 @@ export class SessionStore extends Context.Service<
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
+const SessionClaimMethod = Schema.Literals([
+  "browser-session-cookie",
+  "bearer-access-token",
+  "dpop-access-token",
+]);
 
 const SessionClaims = Schema.Struct({
   v: Schema.Literal(1),
@@ -409,12 +414,24 @@ const SessionClaims = Schema.Struct({
   sid: AuthSessionId,
   sub: Schema.String,
   scopes: AuthEnvironmentScopes,
-  method: Schema.Literals(["browser-session-cookie", "bearer-access-token", "dpop-access-token"]),
+  method: SessionClaimMethod,
   jkt: Schema.optionalKey(Schema.String),
   iat: Schema.Number,
   exp: Schema.Number,
 });
 type SessionClaims = typeof SessionClaims.Type;
+
+const LegacySessionClaims = Schema.Struct({
+  v: Schema.Literal(1),
+  kind: Schema.optionalKey(Schema.Literal("session")),
+  sid: AuthSessionId,
+  sub: Schema.String,
+  scopes: Schema.optionalKey(AuthEnvironmentScopes),
+  method: Schema.optionalKey(SessionClaimMethod),
+  jkt: Schema.optionalKey(Schema.String),
+  iat: Schema.Number,
+  exp: Schema.Number,
+});
 
 const WebSocketClaims = Schema.Struct({
   v: Schema.Literal(1),
@@ -425,7 +442,9 @@ const WebSocketClaims = Schema.Struct({
 });
 type WebSocketClaims = typeof WebSocketClaims.Type;
 
-const decodeSessionClaims = Schema.decodeUnknownEffect(Schema.fromJsonString(SessionClaims));
+const decodeSessionClaims = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Union([SessionClaims, LegacySessionClaims])),
+);
 const decodeWebSocketClaims = Schema.decodeUnknownEffect(Schema.fromJsonString(WebSocketClaims));
 
 function createDefaultClientMetadata(): AuthClientMetadata {
@@ -703,11 +722,11 @@ export const make = Effect.gen(function* () {
       return {
         sessionId: claims.sid,
         token,
-        method: claims.method,
+        method: row.value.method,
         client: toClientMetadata(row.value.client),
         expiresAt: expiresAt.value,
-        subject: claims.sub,
-        scopes: claims.scopes,
+        subject: row.value.subject,
+        scopes: row.value.scopes,
         ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
       } satisfies VerifiedSession;
     },

@@ -6,6 +6,7 @@ import { appAtomRegistry } from "./atomRegistry";
 
 export const SLOW_RPC_ACK_THRESHOLD_MS = 15_000;
 export const MAX_TRACKED_RPC_ACK_REQUESTS = 256;
+const EXPECTED_LONG_RUNNING_RPC_TAGS = new Set(["review.startRun", "review.sendChatMessage"]);
 let slowRpcAckThresholdMs = SLOW_RPC_ACK_THRESHOLD_MS;
 
 export interface SlowRpcAckRequest {
@@ -38,7 +39,11 @@ function getSlowRpcAckRequestsValue(): ReadonlyArray<SlowRpcAckRequest> {
 }
 
 function shouldTrackRpcAck(tag: string): boolean {
-  return !tag.includes("subscribe") && !untrackedRpcAckTags.has(tag);
+  return (
+    !tag.includes("subscribe") &&
+    !untrackedRpcAckTags.has(tag) &&
+    !EXPECTED_LONG_RUNNING_RPC_TAGS.has(tag)
+  );
 }
 
 export function getSlowRpcAckRequests(): ReadonlyArray<SlowRpcAckRequest> {

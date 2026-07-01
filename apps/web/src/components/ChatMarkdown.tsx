@@ -297,6 +297,29 @@ function readInitialWordWrapSetting(): boolean {
   return getClientSettings().wordWrap;
 }
 
+function applyExpandedTableColumnWidths(table: HTMLTableElement): void {
+  const rows = [...table.rows];
+  const columnWidths = rows.reduce<number[]>((widths, row) => {
+    [...row.cells].forEach((cell, columnIndex) => {
+      widths[columnIndex] = Math.max(
+        widths[columnIndex] ?? 0,
+        cell.getBoundingClientRect().width,
+      );
+    });
+    return widths;
+  }, []);
+
+  [...(table.tHead?.rows[0]?.cells ?? [])].forEach((cell, columnIndex) => {
+    cell.style.minWidth = `${columnWidths[columnIndex] ?? cell.getBoundingClientRect().width}px`;
+  });
+}
+
+function clearExpandedTableColumnWidths(table: HTMLTableElement): void {
+  for (const cell of table.tHead?.rows[0]?.cells ?? []) {
+    cell.style.minWidth = "";
+  }
+}
+
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -306,29 +329,19 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
   const copyLabel = copied ? "Copied" : "Copy table";
 
-  function toggleExpanded() {
+  const toggleExpanded = useCallback(() => {
     const table = tableRef.current;
     if (!table) return;
 
-    if (!expanded) {
-      const rows = [...table.rows];
-      const columnWidths = rows.reduce<number[]>((widths, row) => {
-        [...row.cells].forEach((cell, columnIndex) => {
-          widths[columnIndex] = Math.max(
-            widths[columnIndex] ?? 0,
-            cell.getBoundingClientRect().width,
-          );
-        });
-        return widths;
-      }, []);
-
-      [...(table.tHead?.rows[0]?.cells ?? [])].forEach((cell, columnIndex) => {
-        cell.style.minWidth = `${columnWidths[columnIndex] ?? cell.getBoundingClientRect().width}px`;
-      });
-    }
-
-    setExpanded((value) => !value);
-  }
+    setExpanded((currentlyExpanded) => {
+      if (currentlyExpanded) {
+        clearExpandedTableColumnWidths(table);
+      } else {
+        applyExpandedTableColumnWidths(table);
+      }
+      return !currentlyExpanded;
+    });
+  }, []);
 
   const handleCopy = useCallback((format: "markdown" | "csv") => {
     const table = containerRef.current?.querySelector("table");

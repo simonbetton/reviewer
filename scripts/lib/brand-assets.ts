@@ -39,10 +39,10 @@ export interface IconOverride {
 }
 
 const WEB_ICON_TARGET_FILENAMES = {
-  faviconIco: "favicon.ico",
-  favicon16Png: "favicon-16x16.png",
-  favicon32Png: "favicon-32x32.png",
-  appleTouchIconPng: "apple-touch-icon.png",
+  faviconIco: "icon-192.png",
+  favicon16Png: "icon-192.png",
+  favicon32Png: "icon-512.png",
+  appleTouchIconPng: "icon-512.png",
 } as const;
 
 const WEB_ICON_SOURCE_PATHS_BY_BRAND = {

@@ -1,4 +1,4 @@
-import type { DesktopEnvironmentBootstrap } from "@t3tools/contracts";
+import { PRIMARY_LOCAL_ENVIRONMENT_ID, type DesktopEnvironmentBootstrap } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const PrimaryEnvironmentTargetSource = Schema.Literals([
@@ -76,7 +76,11 @@ export interface PrimaryEnvironmentTarget {
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
 function getDesktopLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null {
-  return window.desktopBridge?.getLocalEnvironmentBootstrap() ?? null;
+  // The primary (Windows-native) backend keeps the "primary" id. The
+  // plural list may include a second WSL entry; the primary-target
+  // resolver only cares about the primary, so just find it.
+  const bootstraps = window.desktopBridge?.getLocalEnvironmentBootstraps() ?? [];
+  return bootstraps.find((entry) => entry.id === PRIMARY_LOCAL_ENVIRONMENT_ID) ?? null;
 }
 
 function parseTargetUrl(input: {
@@ -185,16 +189,22 @@ function resolveConfiguredPrimaryTarget(): PrimaryEnvironmentTarget | null {
     return null;
   }
 
-  const resolvedHttpBaseUrl =
-    configuredHttpBaseUrl ??
-    (configuredWsBaseUrl?.startsWith("wss:")
-      ? swapBaseUrlProtocol(configuredWsBaseUrl, "https:", "websocket-base-url")
-      : swapBaseUrlProtocol(configuredWsBaseUrl!, "http:", "websocket-base-url"));
-  const resolvedWsBaseUrl =
-    configuredWsBaseUrl ??
-    (configuredHttpBaseUrl?.startsWith("https:")
+  let resolvedHttpBaseUrl: string;
+  let resolvedWsBaseUrl: string;
+  if (configuredHttpBaseUrl && configuredWsBaseUrl) {
+    resolvedHttpBaseUrl = configuredHttpBaseUrl;
+    resolvedWsBaseUrl = configuredWsBaseUrl;
+  } else if (configuredHttpBaseUrl) {
+    resolvedHttpBaseUrl = configuredHttpBaseUrl;
+    resolvedWsBaseUrl = configuredHttpBaseUrl.startsWith("https:")
       ? swapBaseUrlProtocol(configuredHttpBaseUrl, "wss:", "http-base-url")
-      : swapBaseUrlProtocol(configuredHttpBaseUrl!, "ws:", "http-base-url"));
+      : swapBaseUrlProtocol(configuredHttpBaseUrl, "ws:", "http-base-url");
+  } else {
+    resolvedHttpBaseUrl = configuredWsBaseUrl.startsWith("wss:")
+      ? swapBaseUrlProtocol(configuredWsBaseUrl, "https:", "websocket-base-url")
+      : swapBaseUrlProtocol(configuredWsBaseUrl, "http:", "websocket-base-url");
+    resolvedWsBaseUrl = configuredWsBaseUrl;
+  }
 
   return {
     source: "configured",

@@ -7,7 +7,7 @@ import type {
   AuthSessionId,
   AuthSessionState,
 } from "@t3tools/contracts";
-import { EnvironmentHttpCommonError } from "@t3tools/contracts";
+import { EnvironmentHttpCommonError, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import type { EnvironmentHttpCommonError as EnvironmentHttpCommonErrorType } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -26,6 +26,7 @@ const PrimaryEnvironmentRequestOperation = Schema.Literals([
   "fetch-session-state",
   "exchange-bootstrap-credential",
   "fetch-environment-descriptor",
+  "issue-websocket-ticket",
   "create-pairing-credential",
   "list-pairing-links",
   "revoke-pairing-link",
@@ -176,9 +177,13 @@ export function takePairingTokenFromUrl(): string | null {
 }
 
 function getDesktopBootstrapCredential(): string | null {
-  const bootstrap = window.desktopBridge?.getLocalEnvironmentBootstrap();
-  return typeof bootstrap?.bootstrapToken === "string" && bootstrap.bootstrapToken.length > 0
-    ? bootstrap.bootstrapToken
+  // Both backends share the same bootstrap token (DesktopBackendConfiguration
+  // mints one tokenRef and feeds it to both resolvers), so picking the
+  // primary entry is fine even when the WSL backend is also registered.
+  const bootstraps = window.desktopBridge?.getLocalEnvironmentBootstraps() ?? [];
+  const primary = bootstraps.find((entry) => entry.id === PRIMARY_LOCAL_ENVIRONMENT_ID);
+  return typeof primary?.bootstrapToken === "string" && primary.bootstrapToken.length > 0
+    ? primary.bootstrapToken
     : null;
 }
 
@@ -379,6 +384,21 @@ export async function createServerPairingCredential(input?: {
   }
 }
 
+export async function issuePrimaryWebSocketTicket() {
+  try {
+    return await runPrimaryHttp(
+      PrimaryEnvironmentHttpClient.pipe(
+        Effect.flatMap((client) => client.auth.webSocketTicket({ headers: {} })),
+      ),
+    );
+  } catch (error) {
+    throw PrimaryEnvironmentRequestError.fromCause({
+      operation: "issue-websocket-ticket",
+      cause: error,
+    });
+  }
+}
+
 export async function listServerPairingLinks(): Promise<ReadonlyArray<ServerPairingLinkRecord>> {
   try {
     const pairingLinks = await runPrimaryHttp(
@@ -524,6 +544,16 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
         bootstrapPromise = null;
       }
     });
+}
+
+// Used by the WSL backend swap: invalidate the cached authenticated state
+// (the new backend signs sessions with a different key) and re-bootstrap
+// against the desktop bootstrap credential so the next WS reconnect doesn't
+// hit 401 and start a reauth loop in the renderer.
+export async function reauthenticatePrimaryEnvironment(): Promise<ServerAuthGateState> {
+  resolvedAuthenticatedGateState = null;
+  bootstrapPromise = null;
+  return resolveInitialServerAuthGateState();
 }
 
 export function __resetServerAuthBootstrapForTests() {

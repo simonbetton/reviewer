@@ -18,12 +18,24 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   planSidebarLabel: string;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
+  showModeControls?: boolean;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
+  const hasTraitsMenuContent =
+    props.traitsMenuContent !== null &&
+    props.traitsMenuContent !== undefined &&
+    props.traitsMenuContent !== false;
+  const showModeGroup = props.showModeControls !== false && props.showInteractionModeToggle;
+  const showAccessGroup = props.showModeControls !== false;
+  const hasMenuContent =
+    hasTraitsMenuContent || showModeGroup || showAccessGroup || props.activePlan;
+
+  if (!hasMenuContent) return null;
+
   return (
     <Menu>
       <MenuTrigger
@@ -39,13 +51,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
       <MenuPopup align="start">
-        {props.traitsMenuContent ? (
+        {hasTraitsMenuContent ? (
           <>
             {props.traitsMenuContent}
             <MenuDivider />
           </>
         ) : null}
-        {props.showInteractionModeToggle ? (
+        {showModeGroup ? (
           <>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
             <MenuRadioGroup
@@ -61,21 +73,25 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
           </>
         ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
-          }}
-        >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-        </MenuRadioGroup>
+        {showAccessGroup ? (
+          <>
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+            <MenuRadioGroup
+              value={props.runtimeMode}
+              onValueChange={(value) => {
+                if (!value || value === props.runtimeMode) return;
+                props.onRuntimeModeChange(value as RuntimeMode);
+              }}
+            >
+              <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
+              <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
+              <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+            </MenuRadioGroup>
+          </>
+        ) : null}
         {props.activePlan ? (
           <>
-            <MenuDivider />
+            {showModeGroup || showAccessGroup || hasTraitsMenuContent ? <MenuDivider /> : null}
             <MenuItem onClick={props.onTogglePlanSidebar}>
               <ListTodoIcon className="size-4 shrink-0" />
               {props.planSidebarOpen

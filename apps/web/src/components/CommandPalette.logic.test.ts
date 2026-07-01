@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
+  buildPullRequestActionItems,
+  buildReviewRepositoryActionItems,
   buildThreadActionItems,
   filterCommandPaletteGroups,
   type CommandPaletteGroup,
@@ -99,6 +101,8 @@ describe("buildThreadActionItems", () => {
       isInSubmenu: false,
       projectSearchItems: [],
       threadSearchItems: threadItems,
+      reviewRepositorySearchItems: [],
+      pullRequestSearchItems: [],
     });
 
     expect(groups).toHaveLength(1);
@@ -132,6 +136,8 @@ describe("buildThreadActionItems", () => {
       isInSubmenu: false,
       projectSearchItems: [],
       threadSearchItems: [],
+      reviewRepositorySearchItems: [],
+      pullRequestSearchItems: [],
     });
 
     expect(groups).toHaveLength(1);
@@ -161,5 +167,145 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+describe("buildPullRequestActionItems", () => {
+  it("builds searchable pull request rows with repository context", async () => {
+    const runPullRequest = vi.fn(async () => undefined);
+    const repository = {
+      id: "github:octocat/reviewer",
+      provider: "github" as const,
+      ownerKind: "personal" as const,
+      ownerLogin: "octocat",
+      name: "reviewer",
+      nameWithOwner: "octocat/reviewer",
+      url: "https://github.com/octocat/reviewer",
+      openPullRequestCount: 1,
+      lastProviderUpdatedAt: null,
+      hidden: false,
+    };
+    const pullRequest = {
+      id: "github:octocat/reviewer#42",
+      repositoryId: repository.id,
+      provider: "github" as const,
+      number: 42,
+      title: "Add review sidebar",
+      url: "https://github.com/octocat/reviewer/pull/42",
+      authorLogin: "mona",
+      baseRefName: "main",
+      headRefName: "feature/review-sidebar",
+      state: "open" as const,
+      draft: false,
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      commentCount: 0,
+      reviewDecision: null,
+      checksState: null,
+      headSha: null,
+      lastProviderUpdatedAt: "2026-03-24T12:00:00.000Z",
+      pinned: false,
+      hidden: false,
+      tracked: false,
+    };
+
+    const items = buildPullRequestActionItems({
+      pullRequests: [pullRequest],
+      repositoryById: new Map([[repository.id, repository]]),
+      icon: null,
+      runPullRequest,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.value).toBe("pull-request:github:octocat/reviewer#42");
+    expect(items[0]?.searchTerms).toContain("octocat/reviewer");
+
+    await items[0]?.run();
+
+    expect(runPullRequest).toHaveBeenCalledWith({ repository, pullRequest });
+  });
+
+  it("marks hidden pull request search rows without excluding them", () => {
+    const repository = {
+      id: "github:octocat/reviewer",
+      provider: "github" as const,
+      ownerKind: "personal" as const,
+      ownerLogin: "octocat",
+      name: "reviewer",
+      nameWithOwner: "octocat/reviewer",
+      url: "https://github.com/octocat/reviewer",
+      openPullRequestCount: 1,
+      lastProviderUpdatedAt: null,
+      hidden: false,
+    };
+    const pullRequest = {
+      id: "github:octocat/reviewer#42",
+      repositoryId: repository.id,
+      provider: "github" as const,
+      number: 42,
+      title: "Hidden PR",
+      url: "https://github.com/octocat/reviewer/pull/42",
+      authorLogin: "mona",
+      baseRefName: "main",
+      headRefName: "feature/review-sidebar",
+      state: "open" as const,
+      draft: false,
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      commentCount: 0,
+      reviewDecision: null,
+      checksState: null,
+      headSha: null,
+      lastProviderUpdatedAt: null,
+      pinned: false,
+      hidden: true,
+      tracked: false,
+    };
+
+    const items = buildPullRequestActionItems({
+      pullRequests: [pullRequest],
+      repositoryById: new Map([[repository.id, repository]]),
+      icon: null,
+      runPullRequest: async () => undefined,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.searchTerms).toContain("hidden");
+    expect(items[0]?.titleTrailingContent).toBe("Hidden");
+  });
+});
+
+describe("buildReviewRepositoryActionItems", () => {
+  it("builds searchable repository rows and marks hidden repositories", async () => {
+    const runRepository = vi.fn(async () => undefined);
+    const repository = {
+      id: "github:octocat/reviewer",
+      provider: "github" as const,
+      ownerKind: "personal" as const,
+      ownerLogin: "octocat",
+      name: "reviewer",
+      nameWithOwner: "octocat/reviewer",
+      url: "https://github.com/octocat/reviewer",
+      openPullRequestCount: 3,
+      lastProviderUpdatedAt: null,
+      hidden: true,
+    };
+
+    const items = buildReviewRepositoryActionItems({
+      repositories: [repository],
+      icon: null,
+      runRepository,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.value).toBe("review-repository:github:octocat/reviewer");
+    expect(items[0]?.searchTerms).toContain("hidden");
+    expect(items[0]?.titleTrailingContent).toBe("Hidden");
+
+    await items[0]?.run();
+
+    expect(runRepository).toHaveBeenCalledWith(repository);
   });
 });

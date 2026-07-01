@@ -362,6 +362,7 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateStructured: () => Effect.die("generateStructured should not be called in git tests"),
   };
 }
 

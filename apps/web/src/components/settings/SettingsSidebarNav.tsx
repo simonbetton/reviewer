@@ -94,7 +94,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                           : "size-4 shrink-0 text-muted-foreground/60"
                       }
                     />
-                    <span className="truncate">{item.label}</span>
+                    <span className="truncate text-xs">{item.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               );
@@ -115,7 +115,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 onClick={handleBackClick}
               >
                 <ArrowLeftIcon className="size-4" />
-                <span>Back</span>
+                <span className="text-xs">Back</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

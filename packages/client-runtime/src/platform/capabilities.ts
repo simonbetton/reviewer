@@ -1,8 +1,9 @@
-import {
-  type AuthClientPresentationMetadata,
-  type AuthEnvironmentScope,
-  type DesktopSshEnvironmentBootstrap,
-  type DesktopSshEnvironmentTarget,
+import type {
+  AuthClientPresentationMetadata,
+  AuthEnvironmentScope,
+  AuthWebSocketTicketResult,
+  DesktopSshEnvironmentBootstrap,
+  DesktopSshEnvironmentTarget,
   EnvironmentId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -47,6 +48,10 @@ export class PrimaryEnvironmentAuth extends Context.Service<
   PrimaryEnvironmentAuth,
   {
     readonly bearerToken: Effect.Effect<Option.Option<string>, ConnectionAttemptError>;
+    readonly webSocketTicket: Effect.Effect<
+      Option.Option<AuthWebSocketTicketResult>,
+      ConnectionAttemptError
+    >;
   }
 >()("@t3tools/client-runtime/platform/capabilities/PrimaryEnvironmentAuth") {}
 

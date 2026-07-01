@@ -1,4 +1,9 @@
-import { type KeybindingCommand, type FilesystemBrowseEntry } from "@t3tools/contracts";
+import {
+  type KeybindingCommand,
+  type FilesystemBrowseEntry,
+  type ReviewPullRequest,
+  type ReviewRepository,
+} from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
@@ -179,6 +184,92 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
+export function buildPullRequestActionItems(input: {
+  pullRequests: ReadonlyArray<ReviewPullRequest>;
+  repositoryById: ReadonlyMap<ReviewRepository["id"], ReviewRepository>;
+  icon: ReactNode;
+  runPullRequest: (input: {
+    repository: ReviewRepository;
+    pullRequest: ReviewPullRequest;
+  }) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  return input.pullRequests.flatMap((pullRequest) => {
+    const repository = input.repositoryById.get(pullRequest.repositoryId);
+    if (!repository) {
+      return [];
+    }
+    const timestampSource = pullRequest.lastProviderUpdatedAt;
+    const hidden = pullRequest.hidden || repository.hidden;
+
+    return [
+      Object.assign(
+        {
+          kind: "action" as const,
+          value: `pull-request:${pullRequest.id}`,
+          searchTerms: [
+            pullRequest.title,
+            `#${pullRequest.number}`,
+            `pr ${pullRequest.number}`,
+            `pull request ${pullRequest.number}`,
+            repository.name,
+            repository.nameWithOwner,
+            repository.ownerLogin,
+            pullRequest.authorLogin,
+            pullRequest.headRefName,
+            pullRequest.baseRefName,
+            hidden ? "hidden" : "",
+          ],
+          title: `#${pullRequest.number} ${pullRequest.title}`,
+          description: `${repository.nameWithOwner} · ${pullRequest.authorLogin} · ${pullRequest.headRefName} -> ${pullRequest.baseRefName}`,
+          icon: input.icon,
+        },
+        timestampSource ? { timestamp: formatRelativeTimeLabel(timestampSource) } : {},
+        hidden ? { titleTrailingContent: "Hidden" } : {},
+        {
+          run: async () => {
+            await input.runPullRequest({ repository, pullRequest });
+          },
+        },
+      ),
+    ];
+  });
+}
+
+export function buildReviewRepositoryActionItems(input: {
+  repositories: ReadonlyArray<ReviewRepository>;
+  icon: ReactNode;
+  runRepository: (repository: ReviewRepository) => Promise<void>;
+}): CommandPaletteActionItem[] {
+  return input.repositories.map((repository) =>
+    Object.assign(
+      {
+        kind: "action" as const,
+        value: `review-repository:${repository.id}`,
+        searchTerms: [
+          repository.name,
+          repository.nameWithOwner,
+          repository.ownerLogin,
+          "review repository",
+          "pull requests",
+          "github",
+          repository.hidden ? "hidden" : "",
+        ],
+        title: repository.nameWithOwner,
+        description: `${repository.openPullRequestCount} open pull request${
+          repository.openPullRequestCount === 1 ? "" : "s"
+        }`,
+        icon: input.icon,
+      },
+      repository.hidden ? { titleTrailingContent: "Hidden" } : {},
+      {
+        run: async () => {
+          await input.runRepository(repository);
+        },
+      },
+    ),
+  );
+}
+
 function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
   const normalizedField = normalizeSearchText(field);
   if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
@@ -218,6 +309,8 @@ export function filterCommandPaletteGroups(input: {
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  reviewRepositorySearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  pullRequestSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
@@ -251,6 +344,20 @@ export function filterCommandPaletteGroups(input: {
         value: "threads-search",
         label: "Threads",
         items: input.threadSearchItems,
+      });
+    }
+    if (input.reviewRepositorySearchItems.length > 0) {
+      searchableGroups.push({
+        value: "review-repositories-search",
+        label: "Review Repositories",
+        items: input.reviewRepositorySearchItems,
+      });
+    }
+    if (input.pullRequestSearchItems.length > 0) {
+      searchableGroups.push({
+        value: "pull-requests-search",
+        label: "Pull Requests",
+        items: input.pullRequestSearchItems,
       });
     }
   }
@@ -352,7 +459,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search commands, projects, threads, and PRs...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":

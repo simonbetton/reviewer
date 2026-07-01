@@ -8,6 +8,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   DEFAULT_MODEL,
+  type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
   type ProjectId,
@@ -15,6 +16,7 @@ import {
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
+  PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
@@ -25,6 +27,7 @@ import {
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
+  GitPullRequestIcon,
   LinkIcon,
   MessageSquareIcon,
   SettingsIcon,
@@ -44,9 +47,12 @@ import {
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { OpenAddProjectCommandPaletteProvider } from "../commandPaletteContext";
+import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
+import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useClientSettings } from "../hooks/useSettings";
 import { readLocalApi } from "../localApi";
+import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
@@ -80,9 +86,17 @@ import { cn, isMacPlatform, isWindowsPlatform, newProjectId } from "../lib/utils
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import {
+  applyWslEnvironmentConfiguration,
+  parseWslUncPath,
+  resolveProjectPickerTarget,
+  resolveWslProjectSelection,
+} from "../wslPaths";
+import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
   buildProjectActionItems,
+  buildPullRequestActionItems,
+  buildReviewRepositoryActionItems,
   buildRootGroups,
   buildThreadActionItems,
   type CommandPaletteActionItem,
@@ -116,6 +130,11 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { ComposerHandleContext, useComposerHandleContext } from "../composerHandleContext";
 import type { ChatComposerHandle } from "./chat/ChatComposer";
+import { useReviewAppStore } from "../reviewAppStore";
+import {
+  buildReviewPullRequestRouteParams,
+  buildReviewRepositoryRouteParams,
+} from "../reviewRoutes";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -458,11 +477,15 @@ function OpenCommandPaletteDialog(props: {
     reportFailure: false,
   });
   const { environments } = useEnvironments();
+  const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironment = usePrimaryEnvironment();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
   const threads = useThreadShells();
+  const reviewSnapshot = useReviewAppStore((store) => store.snapshot);
+  const selectReviewRepository = useReviewAppStore((store) => store.selectRepository);
+  const selectReviewPullRequest = useReviewAppStore((store) => store.selectPullRequest);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
@@ -500,9 +523,43 @@ function OpenCommandPaletteDialog(props: {
     return options;
   }, [environments]);
   const defaultAddProjectEnvironmentId = addProjectEnvironmentOptions[0]?.environmentId ?? null;
+  const wslAddProjectEnvironmentOption = useMemo(
+    () =>
+      addProjectEnvironmentOptions.find((option) => {
+        const environment = environments.find(
+          (candidate) => candidate.environmentId === option.environmentId,
+        );
+        return environment
+          ? desktopLocalBackendId(environment.entry.target)?.startsWith("wsl:") === true
+          : false;
+      }) ?? null,
+    [addProjectEnvironmentOptions, environments],
+  );
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId;
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null;
+  // A desktop-local secondary backend (today: the WSL backend). The picker is
+  // available against these too — the desktop dispatches pickFolder into the
+  // backend's filesystem when routed by its instance id.
+  const browseEnvironmentIsDesktopLocal =
+    browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target);
+  // Map the browsed desktop-local env to its desktop pool instance id (e.g.
+  // "wsl:ubuntu"). The catalog environmentId is descriptor-derived and won't
+  // route on the desktop side; pickFolder only recognizes the pool id, which
+  // the bootstrap list exposes. Match on backend URL, exactly as Sidebar's
+  // LocalSecondaryStatus does (environment.displayUrl === bootstrap.httpBaseUrl).
+  const browseDesktopInstanceId = useMemo(() => {
+    if (!browseEnvironmentIsDesktopLocal || browseEnvironment === null) {
+      return null;
+    }
+    const displayUrl = browseEnvironment.displayUrl;
+    if (displayUrl === null) {
+      return null;
+    }
+    return (
+      desktopLocalBootstraps.find((bootstrap) => bootstrap.httpBaseUrl === displayUrl)?.id ?? null
+    );
+  }, [browseEnvironment, browseEnvironmentIsDesktopLocal, desktopLocalBootstraps]);
   const sourceControlDiscovery = useEnvironmentQuery(
     browseEnvironmentId === null
       ? null
@@ -542,6 +599,14 @@ function OpenCommandPaletteDialog(props: {
   const projectTitleById = useMemo(
     () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.title])),
     [projects],
+  );
+  const reviewRepositories = useMemo(
+    () => (reviewSnapshot?.groups ?? []).flatMap((group) => group.repositories),
+    [reviewSnapshot?.groups],
+  );
+  const reviewRepositoryById = useMemo(
+    () => new Map(reviewRepositories.map((repository) => [repository.id, repository] as const)),
+    [reviewRepositories],
   );
 
   const activeThreadId = activeThread?.id;
@@ -669,6 +734,45 @@ function OpenCommandPaletteDialog(props: {
     [activeThreadId, clientSettings.sidebarThreadSortOrder, navigate, projectTitleById, threads],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  const reviewRepositorySearchItems = useMemo(
+    () =>
+      buildReviewRepositoryActionItems({
+        repositories: reviewRepositories,
+        icon: <GitPullRequestIcon className={ITEM_ICON_CLASS} />,
+        runRepository: async (repository) => {
+          selectReviewRepository(repository.id);
+          selectReviewPullRequest(null);
+          await navigate({
+            to: "/review/github/$owner/$repo",
+            params: buildReviewRepositoryRouteParams({ repository }),
+          });
+        },
+      }),
+    [navigate, reviewRepositories, selectReviewPullRequest, selectReviewRepository],
+  );
+  const pullRequestSearchItems = useMemo(
+    () =>
+      buildPullRequestActionItems({
+        pullRequests: reviewSnapshot?.pullRequests ?? [],
+        repositoryById: reviewRepositoryById,
+        icon: <GitPullRequestIcon className={ITEM_ICON_CLASS} />,
+        runPullRequest: async ({ repository, pullRequest }) => {
+          selectReviewRepository(repository.id);
+          selectReviewPullRequest(pullRequest.id);
+          await navigate({
+            to: "/review/github/$owner/$repo/pull/$number",
+            params: buildReviewPullRequestRouteParams({ repository, pullRequest }),
+          });
+        },
+      }),
+    [
+      navigate,
+      reviewRepositoryById,
+      reviewSnapshot?.pullRequests,
+      selectReviewPullRequest,
+      selectReviewRepository,
+    ],
+  );
 
   function pushPaletteView(view: CommandPaletteView): void {
     setViewStack((previousViews) => [
@@ -984,6 +1088,21 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
+  if (wslAddProjectEnvironmentOption) {
+    actionItems.push({
+      kind: "action",
+      value: "action:add-project:wsl-folder",
+      searchTerms: ["add project", "open", "wsl", "linux", "folder", "directory"],
+      title: "Open WSL folder",
+      description: wslAddProjectEnvironmentOption.label,
+      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      run: async () => {
+        startAddProjectBrowse(wslAddProjectEnvironmentOption.environmentId);
+      },
+    });
+  }
+
   actionItems.push({
     kind: "action",
     value: "action:settings",
@@ -1014,13 +1133,20 @@ function OpenCommandPaletteDialog(props: {
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
+    reviewRepositorySearchItems,
+    pullRequestSearchItems,
   });
 
-  const handleAddProject = useCallback(
-    async (rawCwd: string) => {
-      if (!browseEnvironmentId) return;
+  const handleAddProjectForEnvironment = useCallback(
+    async (input: {
+      readonly environmentId: EnvironmentId;
+      readonly rawCwd: string;
+      readonly platform: string;
+      readonly currentProjectCwd: string | null;
+    }) => {
+      const rawCwd = input.rawCwd;
 
-      if (isUnsupportedWindowsProjectPath(rawCwd.trim(), browseEnvironmentPlatform)) {
+      if (isUnsupportedWindowsProjectPath(rawCwd.trim(), input.platform)) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
@@ -1031,7 +1157,7 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      if (isExplicitRelativeProjectPath(rawCwd.trim()) && !currentProjectCwdForBrowse) {
+      if (isExplicitRelativeProjectPath(rawCwd.trim()) && !input.currentProjectCwd) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
@@ -1042,11 +1168,11 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      const cwd = resolveProjectPathForDispatch(rawCwd, currentProjectCwdForBrowse);
+      const cwd = resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd);
       if (cwd.length === 0) return;
 
       const existing = findProjectByPath(
-        projects.filter((project) => project.environmentId === browseEnvironmentId),
+        projects.filter((project) => project.environmentId === input.environmentId),
         cwd,
       );
       if (existing) {
@@ -1084,7 +1210,7 @@ function OpenCommandPaletteDialog(props: {
 
       const projectId = newProjectId();
       const createResult = await createProject({
-        environmentId: browseEnvironmentId,
+        environmentId: input.environmentId,
         input: {
           projectId,
           title: inferProjectTitleFromPath(cwd),
@@ -1111,7 +1237,7 @@ function OpenCommandPaletteDialog(props: {
       }
 
       const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(browseEnvironmentId, projectId)),
+        handleNewThread(scopeProjectRef(input.environmentId, projectId)),
       );
       if (navigationResult._tag === "Failure") {
         const error = squashAtomCommandFailure(navigationResult);
@@ -1127,9 +1253,6 @@ function OpenCommandPaletteDialog(props: {
       setOpen(false);
     },
     [
-      browseEnvironmentId,
-      browseEnvironmentPlatform,
-      currentProjectCwdForBrowse,
       handleNewThread,
       createProject,
       navigate,
@@ -1137,6 +1260,24 @@ function OpenCommandPaletteDialog(props: {
       setOpen,
       clientSettings.sidebarThreadSortOrder,
       threads,
+    ],
+  );
+
+  const handleAddProject = useCallback(
+    async (rawCwd: string) => {
+      if (!browseEnvironmentId) return;
+      await handleAddProjectForEnvironment({
+        environmentId: browseEnvironmentId,
+        rawCwd,
+        platform: browseEnvironmentPlatform,
+        currentProjectCwd: currentProjectCwdForBrowse,
+      });
+    },
+    [
+      browseEnvironmentId,
+      browseEnvironmentPlatform,
+      currentProjectCwdForBrowse,
+      handleAddProjectForEnvironment,
     ],
   );
 
@@ -1372,8 +1513,13 @@ function OpenCommandPaletteDialog(props: {
   const canOpenProjectFromFileManager =
     isBrowsing &&
     browseEnvironmentId !== null &&
-    primaryEnvironmentId !== null &&
-    browseEnvironmentId === primaryEnvironmentId &&
+    // For a desktop-local (WSL) env, only offer the picker once we have resolved
+    // its desktop pool instance id. Without it pickFolder can't be routed to the
+    // WSL filesystem and would open the primary (Windows) picker, then add the
+    // chosen Windows path against the WSL env -- a wrong-path footgun. Stay
+    // hidden until the bootstrap mapping is available rather than mis-routing.
+    (browseEnvironmentId === primaryEnvironmentId ||
+      (browseEnvironmentIsDesktopLocal && browseDesktopInstanceId !== null)) &&
     typeof window !== "undefined" &&
     window.desktopBridge !== undefined;
   const fileManagerInitialPath = useMemo(() => {
@@ -1468,9 +1614,31 @@ function OpenCommandPaletteDialog(props: {
 
     setIsPickingProjectFolder(true);
     let pickedPath: string | null = null;
+    let desktopWslState: DesktopWslState | null = null;
     try {
+      desktopWslState =
+        browseEnvironmentId === primaryEnvironmentId && browseEnvironmentPlatform === "Linux"
+          ? ((await window.desktopBridge?.getWslState().catch(() => null)) ?? null)
+          : null;
+      // Route the picker to the browsed env's backend filesystem. The desktop
+      // only resolves a "wsl:*" pool instance id, so for a desktop-local env we
+      // pass the bootstrap-mapped instance id (not the catalog environmentId).
+      // A WSL-only primary has no secondary bootstrap, so resolve its instance
+      // id from desktop settings. Windows and combo-mode primaries still omit
+      // the target to preserve the native primary picker. The desktop converts
+      // a WSL UNC selection back to a Linux path before returning.
+      const pickerTargetEnvironmentId = resolveProjectPickerTarget({
+        browseEnvironmentId,
+        primaryEnvironmentId,
+        desktopInstanceId: browseDesktopInstanceId,
+        wslConfiguration: desktopWslState,
+      });
+      const pickerOptions = {
+        ...(fileManagerInitialPath ? { initialPath: fileManagerInitialPath } : {}),
+        ...(pickerTargetEnvironmentId ? { targetEnvironmentId: pickerTargetEnvironmentId } : {}),
+      };
       pickedPath = await api.dialogs.pickFolder(
-        fileManagerInitialPath ? { initialPath: fileManagerInitialPath } : undefined,
+        Object.keys(pickerOptions).length > 0 ? pickerOptions : undefined,
       );
     } catch {
       // Ignore picker failures and leave the palette open.
@@ -1481,12 +1649,69 @@ function OpenCommandPaletteDialog(props: {
     if (!pickedPath) {
       return;
     }
+    if (parseWslUncPath(pickedPath)) {
+      desktopWslState ??= (await window.desktopBridge?.getWslState().catch(() => null)) ?? null;
+      let primaryRunningDistro: string | null = null;
+      try {
+        primaryRunningDistro =
+          window.desktopBridge
+            ?.getLocalEnvironmentBootstraps()
+            .find((bootstrap) => bootstrap.id === PRIMARY_LOCAL_ENVIRONMENT_ID)?.runningDistro ??
+          null;
+      } catch {
+        // Keep UNC routing strict when the live primary identity cannot be read.
+      }
+      const selection = resolveWslProjectSelection(
+        pickedPath,
+        applyWslEnvironmentConfiguration(
+          environments.flatMap((environment) => {
+            const backendId = desktopLocalBackendId(environment.entry.target);
+            if (!backendId) {
+              return [];
+            }
+
+            const bootstrap = desktopLocalBootstraps.find(
+              (candidate) => candidate.httpBaseUrl === environment.displayUrl,
+            );
+            const runningDistro = bootstrap?.runningDistro ?? null;
+            return [{ environmentId: environment.environmentId, backendId, runningDistro }];
+          }),
+          primaryEnvironmentId,
+          desktopWslState ?? null,
+          primaryRunningDistro,
+        ),
+      );
+      if (!selection) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not add WSL project",
+            description: "Start the matching WSL backend, then choose the folder again.",
+          }),
+        );
+        return;
+      }
+      await handleAddProjectForEnvironment({
+        environmentId: selection.environmentId,
+        rawCwd: selection.linuxPath,
+        platform: "Linux",
+        currentProjectCwd: null,
+      });
+      return;
+    }
     await handleAddProject(pickedPath);
   }, [
+    browseDesktopInstanceId,
+    browseEnvironmentId,
+    browseEnvironmentPlatform,
     canOpenProjectFromFileManager,
+    desktopLocalBootstraps,
+    environments,
     fileManagerInitialPath,
     handleAddProject,
+    handleAddProjectForEnvironment,
     isPickingProjectFolder,
+    primaryEnvironmentId,
   ]);
 
   return (

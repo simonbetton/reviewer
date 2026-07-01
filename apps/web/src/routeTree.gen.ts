@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ReviewRouteImport } from './routes/review'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
@@ -22,10 +23,17 @@ import { Route as SettingsConnectionsRouteImport } from './routes/settings.conne
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
+import { Route as ReviewGithubOwnerRepoRouteImport } from './routes/review.github.$owner.$repo'
+import { Route as ReviewGithubOwnerRepoPullNumberRouteImport } from './routes/review.github.$owner.$repo.pull.$number'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewRoute = ReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PairRoute = PairRouteImport.update({
@@ -88,10 +96,22 @@ const ChatEnvironmentIdThreadIdRoute =
     path: '/$environmentId/$threadId',
     getParentRoute: () => ChatRoute,
   } as any)
+const ReviewGithubOwnerRepoRoute = ReviewGithubOwnerRepoRouteImport.update({
+  id: '/github/$owner/$repo',
+  path: '/github/$owner/$repo',
+  getParentRoute: () => ReviewRoute,
+} as any)
+const ReviewGithubOwnerRepoPullNumberRoute =
+  ReviewGithubOwnerRepoPullNumberRouteImport.update({
+    id: '/pull/$number',
+    path: '/pull/$number',
+    getParentRoute: () => ReviewGithubOwnerRepoRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/pair': typeof PairRoute
+  '/review': typeof ReviewRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -102,9 +122,12 @@ export interface FileRoutesByFullPath {
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/review/github/$owner/$repo': typeof ReviewGithubOwnerRepoRouteWithChildren
+  '/review/github/$owner/$repo/pull/$number': typeof ReviewGithubOwnerRepoPullNumberRoute
 }
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
+  '/review': typeof ReviewRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -116,11 +139,14 @@ export interface FileRoutesByTo {
   '/': typeof ChatIndexRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/review/github/$owner/$repo': typeof ReviewGithubOwnerRepoRouteWithChildren
+  '/review/github/$owner/$repo/pull/$number': typeof ReviewGithubOwnerRepoPullNumberRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
   '/pair': typeof PairRoute
+  '/review': typeof ReviewRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -132,12 +158,15 @@ export interface FileRoutesById {
   '/_chat/': typeof ChatIndexRoute
   '/_chat/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
+  '/review/github/$owner/$repo': typeof ReviewGithubOwnerRepoRouteWithChildren
+  '/review/github/$owner/$repo/pull/$number': typeof ReviewGithubOwnerRepoPullNumberRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/pair'
+    | '/review'
     | '/settings'
     | '/settings/archived'
     | '/settings/connections'
@@ -148,9 +177,12 @@ export interface FileRouteTypes {
     | '/settings/source-control'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/review/github/$owner/$repo'
+    | '/review/github/$owner/$repo/pull/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/pair'
+    | '/review'
     | '/settings'
     | '/settings/archived'
     | '/settings/connections'
@@ -162,10 +194,13 @@ export interface FileRouteTypes {
     | '/'
     | '/$environmentId/$threadId'
     | '/draft/$draftId'
+    | '/review/github/$owner/$repo'
+    | '/review/github/$owner/$repo/pull/$number'
   id:
     | '__root__'
     | '/_chat'
     | '/pair'
+    | '/review'
     | '/settings'
     | '/settings/archived'
     | '/settings/connections'
@@ -177,11 +212,14 @@ export interface FileRouteTypes {
     | '/_chat/'
     | '/_chat/$environmentId/$threadId'
     | '/_chat/draft/$draftId'
+    | '/review/github/$owner/$repo'
+    | '/review/github/$owner/$repo/pull/$number'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   PairRoute: typeof PairRoute
+  ReviewRoute: typeof ReviewRouteWithChildren
   SettingsRoute: typeof SettingsRouteWithChildren
 }
 
@@ -192,6 +230,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pair': {
@@ -278,6 +323,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatEnvironmentIdThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/review/github/$owner/$repo': {
+      id: '/review/github/$owner/$repo'
+      path: '/github/$owner/$repo'
+      fullPath: '/review/github/$owner/$repo'
+      preLoaderRoute: typeof ReviewGithubOwnerRepoRouteImport
+      parentRoute: typeof ReviewRoute
+    }
+    '/review/github/$owner/$repo/pull/$number': {
+      id: '/review/github/$owner/$repo/pull/$number'
+      path: '/pull/$number'
+      fullPath: '/review/github/$owner/$repo/pull/$number'
+      preLoaderRoute: typeof ReviewGithubOwnerRepoPullNumberRouteImport
+      parentRoute: typeof ReviewGithubOwnerRepoRoute
+    }
   }
 }
 
@@ -294,6 +353,30 @@ const ChatRouteChildren: ChatRouteChildren = {
 }
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
+
+interface ReviewGithubOwnerRepoRouteChildren {
+  ReviewGithubOwnerRepoPullNumberRoute: typeof ReviewGithubOwnerRepoPullNumberRoute
+}
+
+const ReviewGithubOwnerRepoRouteChildren: ReviewGithubOwnerRepoRouteChildren = {
+  ReviewGithubOwnerRepoPullNumberRoute: ReviewGithubOwnerRepoPullNumberRoute,
+}
+
+const ReviewGithubOwnerRepoRouteWithChildren =
+  ReviewGithubOwnerRepoRoute._addFileChildren(
+    ReviewGithubOwnerRepoRouteChildren,
+  )
+
+interface ReviewRouteChildren {
+  ReviewGithubOwnerRepoRoute: typeof ReviewGithubOwnerRepoRouteWithChildren
+}
+
+const ReviewRouteChildren: ReviewRouteChildren = {
+  ReviewGithubOwnerRepoRoute: ReviewGithubOwnerRepoRouteWithChildren,
+}
+
+const ReviewRouteWithChildren =
+  ReviewRoute._addFileChildren(ReviewRouteChildren)
 
 interface SettingsRouteChildren {
   SettingsArchivedRoute: typeof SettingsArchivedRoute
@@ -322,6 +405,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   PairRoute: PairRoute,
+  ReviewRoute: ReviewRouteWithChildren,
   SettingsRoute: SettingsRouteWithChildren,
 }
 export const routeTree = rootRouteImport
